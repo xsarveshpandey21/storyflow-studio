@@ -1,0 +1,8 @@
+# StoryFlow Studio gitignore
+node_modules/
+.env
+.env.local
+*.log
+deploy.zip
+*.zip
+dist/

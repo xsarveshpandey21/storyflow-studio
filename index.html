@@ -1,0 +1,1333 @@
+<!DOCTYPE html>
+<html lang="hi">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>FrameFlow Studio — AI-Powered Video & Publish Studio</title>
+  <meta name="description" content="Transform stories into cinematic animated videos with Hindi narration, Ken Burns motion, subtitles, and Gemini-generated YouTube & Facebook metadata.">
+  
+  <!-- Modern Typography: Noto Sans Devanagari for Hindi, Plus Jakarta Sans & Inter -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Noto+Sans+Devanagari:wght@400;500;600;700;800&family=Plus+Jakarta+Sans:wght@500;600;700;800&family=Bebas+Neue&family=Montserrat:wght@600;700;800&display=swap" rel="stylesheet">
+  
+  <style>
+    /* Critical base styles to ensure immediate dark theme and hide modal/future wizard steps */
+    .hidden, [hidden] { display: none !important; }
+    html, body {
+      background-color: #150d08;
+      color: #fff9e6;
+      font-family: 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+      margin: 0;
+      padding: 0;
+    }
+  </style>
+  <link rel="stylesheet" href="./css/style.css">
+</head>
+<body class="dark-theme">
+  <!-- Offscreen canvas for frame capture and thumbnail processing -->
+  <canvas id="offscreenCanvas" class="sr-only"></canvas>
+
+  <div class="app-layout">
+    <!-- Top Sticky Header -->
+    <header class="app-header">
+      <div class="header-brand">
+        <div class="logo-icon">
+          <svg width="24" height="24" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <polygon points="5 3 19 12 5 21 5 3"></polygon>
+          </svg>
+        </div>
+        <div class="brand-text">
+          <h1>FrameFlow <span class="highlight-text">Studio</span></h1>
+          <span class="version-tag">Publish Portal</span>
+        </div>
+      </div>
+
+      <!-- Persistent Wizard Progress Steps (4 Steps) -->
+      <nav class="wizard-stepper" aria-label="Creation Steps" id="wizardStepper">
+        <button type="button" class="step-btn active" data-step="1" id="stepBtn1">
+          <span class="step-number">1</span>
+          <span class="step-label">Source & Frames</span>
+        </button>
+        <button type="button" class="step-btn" data-step="2" id="stepBtn2">
+          <span class="step-number">2</span>
+          <span class="step-label">Voice & Script</span>
+        </button>
+        <button type="button" class="step-btn" data-step="3" id="stepBtn3">
+          <span class="step-number">3</span>
+          <span class="step-label">Studio & Export</span>
+        </button>
+        <button type="button" class="step-btn" data-step="4" id="stepBtn4">
+          <span class="step-number">4</span>
+          <span class="step-label">Publish Portal</span>
+        </button>
+      </nav>
+
+      <!-- Header Actions -->
+      <div class="header-actions">
+        <!-- Autosave Badge -->
+        <div class="autosave-badge" id="autosaveBadge" title="Project state is continuously saved in local IndexedDB storage">
+          <span class="dot"></span>
+          <span id="autosaveText">Saved ✓</span>
+        </div>
+
+        <!-- My Projects -->
+        <button type="button" id="myProjectsBtn" class="btn btn-secondary btn-sm" title="View & manage saved projects">
+          📁 <span>My Projects</span>
+        </button>
+
+        <!-- Theme Toggle -->
+        <button type="button" id="themeToggleBtn" class="theme-toggle-btn" title="Toggle Light / Dark Theme" aria-label="Toggle Theme">
+          <span class="theme-icon-dark">🌙</span>
+          <span class="theme-icon-light hidden">☀️</span>
+        </button>
+
+        <!-- Reset -->
+        <button type="button" id="resetAppBtn" class="btn btn-ghost btn-sm text-danger" title="Reset all data">
+          <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2">
+            <polyline points="3 6 5 6 21 6"></polyline>
+            <path d="M19 6v14a2 2 0 0 1-2 2H7a2 2 0 0 1-2-2V6m3 0V4a2 2 0 0 1 2-2h4a2 2 0 0 1 2 2v2"></path>
+          </svg>
+          <span>Reset</span>
+        </button>
+      </div>
+    </header>
+
+    <!-- Main Content Area with 4 Wizard Steps -->
+    <main class="main-content">
+      
+      <!-- ============================================== -->
+      <!-- STEP 1: SOURCE & FRAMES                        -->
+      <!-- ============================================== -->
+      <section id="step1Section" class="wizard-section active">
+        <div class="section-container">
+          <div class="section-intro">
+            <h2>Step 1: Source & Frames</h2>
+            <p>Upload a video to extract stratified photos, generate a 1-minute test sample video, or directly upload photo files.</p>
+          </div>
+
+          <!-- Video Dropzone & Direct Photo Upload Row -->
+          <div class="photo-sources-grid">
+            <!-- Video Dropzone -->
+            <div id="videoDropzone" class="dropzone-card">
+              <input type="file" id="videoFileInput" accept="video/mp4,video/webm,video/quicktime,video/x-matroska" class="sr-only">
+              <div class="dropzone-content">
+                <div class="dropzone-icon">📹</div>
+                <h3>Extract from Video</h3>
+                <p>Stratified 15–20 photos/minute, zero black frames</p>
+                <div class="dropzone-btn-row">
+                  <button type="button" class="btn btn-primary btn-sm" onclick="document.getElementById('videoFileInput').click()">
+                    Select Video File
+                  </button>
+                  <button type="button" id="createSampleVideoBtn" class="btn btn-xs btn-outline">
+                    Generate 1-Min Test Video
+                  </button>
+                </div>
+              </div>
+            </div>
+
+            <!-- Direct Photo Upload Dropzone -->
+            <div id="photoDropzone" class="dropzone-card">
+              <input type="file" id="directPhotoUploadInput" accept="image/jpeg,image/png,image/webp" multiple class="sr-only">
+              <div class="dropzone-content">
+                <div class="dropzone-icon">🖼️</div>
+                <h3>Direct Photo Upload</h3>
+                <p>Upload historical or archival photos directly</p>
+                <div class="dropzone-btn-row">
+                  <button type="button" id="directPhotoUploadBtn" class="btn btn-secondary btn-sm" onclick="document.getElementById('directPhotoUploadInput').click()">
+                    Select Photo Files (.jpg, .png)
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Video Metadata Card -->
+          <div id="videoMetaCard" class="card meta-card hidden">
+            <div class="meta-icon">📹</div>
+            <div class="meta-info">
+              <h4 id="videoFileName">video_sample.mp4</h4>
+              <div class="meta-stats">
+                <span class="badge" id="videoDurationBadge">Duration: 00:00</span>
+                <span class="badge" id="videoResolutionBadge">Resolution: 1920x1080</span>
+                <span class="badge" id="videoSizeBadge">Size: 0 MB</span>
+                <span class="badge badge-success">Audio Stripped ✓</span>
+              </div>
+            </div>
+            <button type="button" id="changeVideoBtn" class="btn btn-secondary btn-sm">Change Video</button>
+          </div>
+
+          <!-- Interactive Video Clipper & Framing Studio Card -->
+          <div id="videoClipperCard" class="card clipper-card hidden" style="margin-top: 1.5rem;">
+            <div class="card-header">
+              <div class="title-with-badge">
+                <h3>🎬 Video Framing & Interactive Clipper</h3>
+                <span class="badge badge-pill" id="clipperTimecodeBadge">00:00.00</span>
+              </div>
+              <div class="aspect-pills-bar" id="clipperRatioPills">
+                <button type="button" class="aspect-pill active" data-ratio="16:9">16:9 Landscape</button>
+                <button type="button" class="aspect-pill" data-ratio="9:16">9:16 Shorts/Reels</button>
+                <button type="button" class="aspect-pill" data-ratio="1:1">1:1 Square</button>
+                <button type="button" class="aspect-pill" data-ratio="custom">Custom Drag</button>
+              </div>
+            </div>
+
+            <div class="clipper-stage-container">
+              <div id="clipperVideoViewport" class="clipper-video-viewport">
+                <video id="sourceVideo" class="clipper-video" muted playsinline preload="auto"></video>
+                <div id="cropMaskLeft" class="crop-mask crop-mask-left"></div>
+                <div id="cropMaskRight" class="crop-mask crop-mask-right"></div>
+                <div id="cropMaskTop" class="crop-mask crop-mask-top"></div>
+                <div id="cropMaskBottom" class="crop-mask crop-mask-bottom"></div>
+
+                <!-- Interactive Draggable Crop & Resolution Window -->
+                <div id="cropWindow" class="crop-window" title="Drag to re-frame; drag corners to resize resolution">
+                  <span id="cropWindowRatioTag" class="crop-tag">16:9 Viewfinder</span>
+                  <div class="crop-guide-center"></div>
+
+                  <!-- 4 Corner Resize Handles -->
+                  <div class="crop-corner top-left" data-corner="top-left" title="Drag corner to resize"></div>
+                  <div class="crop-corner top-right" data-corner="top-right" title="Drag corner to resize"></div>
+                  <div class="crop-corner bottom-left" data-corner="bottom-left" title="Drag corner to resize"></div>
+                  <div class="crop-corner bottom-right" data-corner="bottom-right" title="Drag corner to resize"></div>
+
+                  <!-- Draggable Sticker / Tag Mark element -->
+                  <div id="draggableCropWatermark" class="draggable-crop-watermark hidden" title="Drag and drop sticker anywhere over video">
+                    <span id="cropWatermarkContent" class="crop-wm-badge">@StoryFlow</span>
+                  </div>
+                </div>
+
+                <div id="clipperFlashEffect" class="clipper-flash"></div>
+              </div>
+
+              <!-- Transport & Scrubber Bar -->
+              <div class="transport-bar">
+                <div class="transport-left">
+                  <button type="button" id="clipperPlayPauseBtn" class="play-main-btn" title="Play / Pause">
+                    <span id="clipperPlayIcon">▶</span>
+                    <span id="clipperPauseIcon" class="hidden">⏸</span>
+                  </button>
+                  <button type="button" id="clipperPrevFrameBtn" class="control-icon-btn" title="Previous Frame">⏮</button>
+                  <button type="button" id="clipperNextFrameBtn" class="control-icon-btn" title="Next Frame">⏭</button>
+                  <button type="button" id="clipperJumpBack5Btn" class="control-icon-btn" title="-5s">⏪</button>
+                  <button type="button" id="clipperJumpForward5Btn" class="control-icon-btn" title="+5s">⏩</button>
+                  <div class="time-readout">
+                    <span id="videoCurrentTimeDisplay">00:00.00</span> / <span id="videoTotalTimeDisplay">00:00.00</span>
+                  </div>
+                </div>
+
+                <div class="transport-right">
+                  <div class="framing-slider-wrapper" id="clipperFramingGroup">
+                    <span class="help-text">Pan:</span>
+                    <input type="range" id="clipperFramingSlider" min="0" max="100" value="50" class="range-slider">
+                    <span id="clipperFramingVal" class="help-text">50%</span>
+                    <button type="button" id="frameAlignLeftBtn" class="btn btn-xs btn-ghost">L</button>
+                    <button type="button" id="frameAlignCenterBtn" class="btn btn-xs btn-ghost">C</button>
+                    <button type="button" id="frameAlignRightBtn" class="btn btn-xs btn-ghost">R</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- Scrubber Slider -->
+              <div class="scrubber-wrapper">
+                <input type="range" id="videoScrubberSlider" min="0" max="100" step="0.01" value="0" class="range-slider" style="width: 100%;">
+              </div>
+
+              <!-- Quick Action Row -->
+              <div class="clipper-action-row" style="display: flex; justify-content: space-between; align-items: center; flex-wrap: wrap; gap: 0.5rem; margin-top: 0.5rem;">
+                <div class="clipper-actions-left">
+                  <label class="checkbox-label" for="clipperApplyCropCheck">
+                    <input type="checkbox" id="clipperApplyCropCheck" checked>
+                    <span>Apply Framing Crop on Extraction</span>
+                  </label>
+                </div>
+                <div class="clipper-actions-right" style="display: flex; gap: 0.5rem;">
+                  <button type="button" id="clipCurrentFrameBtn" class="btn btn-secondary btn-sm">
+                    📸 Clip Single Photo
+                  </button>
+                  <button type="button" id="quickClipIntervalBtn" class="btn btn-outline btn-sm">
+                    ⚡ Quick Clip (5 Photos)
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Extraction Settings Card -->
+          <div class="card" id="extractionConfigCard" style="margin-top: 1.5rem;">
+            <div class="card-header">
+              <h3>Stratified Sampler & Extraction Settings</h3>
+              <span class="badge badge-pill" id="photosPerMinDisplay">15 – 20</span>
+            </div>
+            <div class="form-row-2">
+              <div class="form-group">
+                <label class="form-label">Min Photos per Minute (<span id="photosPerMinMinVal">15</span>)</label>
+                <input type="range" id="photosPerMinMin" min="5" max="35" value="15" class="range-slider">
+              </div>
+              <div class="form-group">
+                <label class="form-label">Max Photos per Minute (<span id="photosPerMinMaxVal">20</span>)</label>
+                <input type="range" id="photosPerMinMax" min="10" max="40" value="20" class="range-slider">
+              </div>
+            </div>
+
+            <!-- Resolution Control -->
+            <div class="extraction-config-section">
+              <div class="section-sub-title">
+                <span>📐 Resolution Control</span>
+                <span class="badge" id="extractionResTag">1920 × 1080 (1080p)</span>
+              </div>
+              <div class="form-row-2">
+                <div class="form-group">
+                  <label for="extractResolutionSelect" class="form-label">Photo Extraction Quality</label>
+                  <select id="extractResolutionSelect" class="form-select">
+                    <option value="1080p" selected>1080p Full HD (1920×1080) — Recommended</option>
+                    <option value="720p">720p HD (1280×720) — Fast Processing</option>
+                    <option value="4k">4K Ultra HD (3840×2160) — Crisp Master</option>
+                    <option value="original">Match Original Video Resolution</option>
+                    <option value="custom">Custom Width × Height...</option>
+                  </select>
+                  <input type="hidden" id="extractResolution" value="1080">
+                </div>
+                <div class="form-group hidden" id="customResolutionInputs">
+                  <label class="form-label">Custom Dimensions (W × H)</label>
+                  <div class="custom-res-row">
+                    <input type="number" id="customExtractWidth" class="form-input form-input-sm" min="320" max="7680" value="1920" placeholder="Width">
+                    <span class="res-x">×</span>
+                    <input type="number" id="customExtractHeight" class="form-input form-input-sm" min="240" max="4320" value="1080" placeholder="Height">
+                    <div class="res-quick-presets">
+                      <button type="button" class="btn btn-xs btn-outline res-preset-btn" data-w="1920" data-h="1080">16:9</button>
+                      <button type="button" class="btn btn-xs btn-outline res-preset-btn" data-w="1080" data-h="1920">9:16</button>
+                      <button type="button" class="btn btn-xs btn-outline res-preset-btn" data-w="1080" data-h="1080">1:1</button>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Sticker & Tag Mark (Watermark) -->
+            <div class="extraction-config-section watermark-config-box">
+              <div class="watermark-toggle-row">
+                <label class="checkbox-label" for="enableWatermarkCheck">
+                  <input type="checkbox" id="enableWatermarkCheck">
+                  <span class="checkbox-text">✨ <strong>Add Sticker or Tag Mark</strong> onto extracted photos</span>
+                </label>
+                <span class="badge badge-accent hidden" id="watermarkActiveBadge">Active</span>
+              </div>
+
+              <div id="watermarkControlsPanel" class="watermark-panel hidden">
+                <!-- Mode Tabs: Text Tag, Custom Sticker Image, Preset Badge -->
+                <div class="wm-tabs-row">
+                  <button type="button" class="wm-tab-btn active" data-wm-mode="text" id="wmTabTextBtn">🏷️ Text Tag Mark</button>
+                  <button type="button" class="wm-tab-btn" data-wm-mode="image" id="wmTabImageBtn">🖼️ Custom Sticker / Logo</button>
+                  <button type="button" class="wm-tab-btn" data-wm-mode="preset" id="wmTabPresetBtn">🌟 Preset Badges</button>
+                </div>
+
+                <!-- 1. Text Tag Mode Panel -->
+                <div id="wmTextPanel" class="wm-sub-panel">
+                  <div class="form-row-2">
+                    <div class="form-group">
+                      <label for="watermarkTextInput" class="form-label">Tag Text / Handle / Channel Name</label>
+                      <input type="text" id="watermarkTextInput" class="form-input" placeholder="e.g. @MyChannel or HISTORIC ARCHIVES" value="@StoryFlow">
+                    </div>
+                    <div class="form-group">
+                      <label for="watermarkTextStyle" class="form-label">Badge Styling</label>
+                      <select id="watermarkTextStyle" class="form-select">
+                        <option value="dark-pill" selected>Dark Glass Pill (White text)</option>
+                        <option value="gold-pill">Golden Heritage (Gold outline)</option>
+                        <option value="red-box">Red Box (Breaking/Notice)</option>
+                        <option value="clean-text">Minimal Text Only (Soft shadow)</option>
+                      </select>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 2. Image Sticker Mode Panel -->
+                <div id="wmImagePanel" class="wm-sub-panel hidden">
+                  <div class="form-group">
+                    <label class="form-label">Upload Sticker / Logo Image (.png, .webp, .svg, .jpg)</label>
+                    <div class="sticker-upload-row">
+                      <input type="file" id="watermarkFileInput" accept="image/png,image/webp,image/svg+xml,image/jpeg" class="sr-only">
+                      <button type="button" id="selectStickerBtn" class="btn btn-secondary btn-sm">
+                        📁 Choose Sticker / Logo File
+                      </button>
+                      <span id="stickerFileName" class="text-muted text-sm">No file chosen</span>
+                      <div id="stickerThumbPreview" class="sticker-thumb-box hidden">
+                        <img id="stickerPreviewImg" src="" alt="Sticker preview">
+                        <button type="button" id="removeStickerBtn" class="btn btn-xs btn-ghost text-danger" title="Remove sticker">✕</button>
+                      </div>
+                    </div>
+                  </div>
+                </div>
+
+                <!-- 3. Preset Badge Mode Panel -->
+                <div id="wmPresetPanel" class="wm-sub-panel hidden">
+                  <label class="form-label">Pick a Preset Sticker / Stamp</label>
+                  <div class="preset-badges-row">
+                    <button type="button" class="preset-badge-btn active" data-preset="🇮🇳 INDIA ARCHIVE">🇮🇳 India</button>
+                    <button type="button" class="preset-badge-btn" data-preset="⭐ VERIFIED">⭐ Verified</button>
+                    <button type="button" class="preset-badge-btn" data-preset="🎬 FILM REEL">🎬 Film</button>
+                    <button type="button" class="preset-badge-btn" data-preset="📜 HISTORIC STORY">📜 Historic</button>
+                    <button type="button" class="preset-badge-btn" data-preset="🔴 LIVE ARCHIVE">🔴 LIVE</button>
+                    <button type="button" class="preset-badge-btn" data-preset="🏷️ EXCLUSIVE">🏷️ Exclusive</button>
+                  </div>
+                </div>
+
+                <!-- Position, Size, Opacity Controls & Mini Live Preview -->
+                <div class="wm-adjustments-grid">
+                  <div class="form-group">
+                    <label for="watermarkPositionSelect" class="form-label">Position on Photo</label>
+                    <select id="watermarkPositionSelect" class="form-select">
+                      <option value="bottom-right" selected>Bottom-Right (Standard)</option>
+                      <option value="bottom-left">Bottom-Left</option>
+                      <option value="top-right">Top-Right</option>
+                      <option value="top-left">Top-Left</option>
+                      <option value="center">Center Stamp</option>
+                      <option value="custom">🎯 Custom (Drag & Drop over Video)</option>
+                    </select>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="watermarkSizeSelect" class="form-label">Sticker Size</label>
+                    <select id="watermarkSizeSelect" class="form-select">
+                      <option value="small">Small (Subtle)</option>
+                      <option value="medium" selected>Medium (Standard)</option>
+                      <option value="large">Large (Prominent)</option>
+                    </select>
+                  </div>
+
+                  <div class="form-group">
+                    <label for="watermarkOpacitySlider" class="form-label">Opacity: <span id="watermarkOpacityVal">85%</span></label>
+                    <input type="range" id="watermarkOpacitySlider" min="20" max="100" value="85" class="range-slider">
+                  </div>
+
+                  <div class="form-group">
+                    <label class="form-label">Live Preview</label>
+                    <div class="wm-preview-strip" id="wmLivePreviewBox">
+                      <span id="wmLivePreviewText" class="wm-preview-tag">@StoryFlow</span>
+                    </div>
+                  </div>
+                </div>
+              </div>
+            </div>
+            <div class="form-row" style="margin-top: 0.5rem; display: flex; gap: 0.75rem;">
+              <button type="button" id="startExtractionBtn" class="btn btn-primary btn-md">
+                ⚡ Start Frame Extraction
+              </button>
+              <button type="button" id="cancelExtractionBtn" class="btn btn-secondary btn-md">
+                Cancel
+              </button>
+            </div>
+          </div>
+
+          <!-- Frame Gallery Section -->
+          <div id="framesGallerySection" class="gallery-section" style="margin-top: 1.5rem;">
+            <div class="gallery-header">
+              <div class="gallery-title-group">
+                <h3>Photo Collection</h3>
+                <span class="badge badge-accent" id="totalExtractedBadge">0 Photos</span>
+                <span class="badge badge-star" id="starredCountBadge">0 Starred</span>
+              </div>
+              <div class="gallery-actions">
+                <div class="filter-toggles">
+                  <button type="button" class="btn btn-xs btn-secondary active" id="filterAllFramesBtn">All</button>
+                  <button type="button" class="btn btn-xs btn-secondary" id="filterStarredFramesBtn">⭐ Starred Only</button>
+                </div>
+                <button type="button" id="starAllFramesBtn" class="btn btn-xs btn-outline">Star All</button>
+                <button type="button" id="clearFramesBtn" class="btn btn-xs btn-danger">Clear All</button>
+              </div>
+            </div>
+
+            <p class="gallery-hint">
+              💡 Star (⭐) your favorite photos to give them <strong>2.5x higher repetition weight</strong>.
+            </p>
+
+            <div id="extractedGalleryGrid" class="frames-grid">
+              <div class="empty-placeholder">
+                <span>No photos extracted yet. Upload a video or generate a sample video above.</span>
+              </div>
+            </div>
+          </div>
+
+          <div class="step-nav-bar">
+            <div></div>
+            <button type="button" id="goToStep2Btn" class="btn btn-primary btn-lg">
+              Continue to Step 2: Voice & Script →
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================== -->
+      <!-- STEP 2: VOICE & SCRIPT                         -->
+      <!-- ============================================== -->
+      <section id="step2Section" class="wizard-section">
+        <div class="section-container">
+          <div class="section-intro">
+            <h2>Step 2: Voice & Script</h2>
+            <p>Paste or write your narration script in Hindi, English, or mixed languages. Record your own voice or use Microsoft Neural Text-to-Speech.</p>
+          </div>
+
+          <div class="voice-step-grid">
+            <!-- Left Column: Script & Captions -->
+            <div class="card script-card">
+              <div class="card-header">
+                <div class="title-with-badge">
+                  <h3>Spoken Script Content</h3>
+                  <span class="badge badge-accent">Devanagari Hindi or English</span>
+                </div>
+                <div style="display: flex; gap: 0.5rem;">
+                  <button type="button" id="loadSampleScriptBtn" class="btn btn-xs btn-outline">
+                    📜 Load Sample Script
+                  </button>
+                  <button type="button" id="realignCaptionsBtn" class="btn btn-xs btn-secondary">
+                    Auto-Align Captions
+                  </button>
+                </div>
+              </div>
+
+              <div class="form-group">
+                <textarea id="scriptTextarea" class="form-textarea hindi-font" rows="7" placeholder="यहाँ अपनी कहानी या स्क्रिप्ट पेस्ट करें... (Supports Hindi '।' danda sentence stops)"></textarea>
+              </div>
+
+              <div class="script-stats-bar">
+                <div class="stat-pill"><strong id="scriptWordCount">0</strong> words</div>
+                <div class="stat-pill"><strong id="scriptCharCount">0</strong> characters</div>
+                <div class="stat-pill"><strong id="scriptChunksCount">0</strong> sentences</div>
+                <div class="stat-pill">Est. Audio: <strong id="scriptEstTime">00:00</strong></div>
+              </div>
+
+              <div class="card-sub-header" style="margin-top: 1rem;">
+                <h4>Interactive Caption Chunks (<span id="captionChunksCount">0</span>)</h4>
+              </div>
+
+              <div id="captionsListContainer" class="caption-chunks-list">
+                <div class="empty-placeholder">
+                  <span>Captions will automatically synchronize with your voice timing.</span>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Column: Voice Source -->
+            <div class="card voice-card">
+              <div class="card-header">
+                <h3>Voice-Over Source</h3>
+                <div class="voice-mode-pills">
+                  <button type="button" class="voice-pill active" data-mode="B" id="voiceModeBtnB">
+                    🎙️ My Own Voice
+                  </button>
+                  <button type="button" class="voice-pill" data-mode="A" id="voiceModeBtnA">
+                    🤖 Neural TTS
+                  </button>
+                </div>
+              </div>
+
+              <!-- MODE B: My Own Voice -->
+              <div id="voiceModeCardB" class="voice-mode-panel active">
+                <div class="voice-input-choice">
+                  <label for="audioFileInput" class="btn btn-secondary btn-sm cursor-pointer">
+                    📁 Upload Audio File (.mp3, .wav)
+                  </label>
+                  <input type="file" id="audioFileInput" accept="audio/*" class="sr-only">
+                  <span class="or-separator">or</span>
+                  <button type="button" id="recordVoiceBtn" class="btn btn-danger btn-sm">
+                    🔴 Record Microphone
+                  </button>
+                  <button type="button" id="stopRecordBtn" class="btn btn-secondary btn-sm hidden">
+                    ⏹️ Stop Recording
+                  </button>
+                </div>
+
+                <div id="audioDropzone" class="dropzone-card" style="margin-top: 1rem; padding: 1.5rem;">
+                  <p>Drag and drop audio file here (.wav, .mp3, .m4a)</p>
+                </div>
+
+                <!-- Audio Loaded Status Bar -->
+                <div id="audioPlayerPanel" class="audio-loaded-box hidden" style="margin-top: 1rem; padding: 0.85rem; border-radius: 8px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between;">
+                  <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <span style="font-size: 1.25rem;">🎵</span>
+                    <div>
+                      <div id="audioFileNameDisplay" style="font-weight: 600; font-size: 0.9rem;">voice.wav</div>
+                      <div class="text-muted text-xs"><span id="audioDurationDisplay">00:00</span> duration &middot; Voice Active ✓</div>
+                    </div>
+                  </div>
+                  <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <button type="button" id="playAudioPreviewBtn" class="btn btn-xs btn-primary">▶ Play Voice</button>
+                    <button type="button" id="stopAudioPreviewBtn" class="btn btn-xs btn-secondary hidden">⏹ Stop</button>
+                    <button type="button" id="reRecordBtn" class="btn btn-xs btn-outline">Change Audio</button>
+                  </div>
+                </div>
+              </div>
+
+              <!-- MODE A: Neural TTS -->
+              <div id="voiceModeCardA" class="voice-mode-panel hidden">
+                <div id="ttsBackendBanner" class="alert-banner warning hidden" style="margin-bottom: 0.75rem; padding: 0.6rem 0.8rem; border-radius: 6px; font-size: 0.85rem; background: rgba(234, 179, 8, 0.1); border: 1px solid rgba(234, 179, 8, 0.3); color: #facc15;">
+                  ⚠️ Neural TTS server is offline. Run <code>npm start</code> at <strong>http://localhost:3000</strong> to enable Microsoft Neural voices.
+                </div>
+
+                <div class="form-group">
+                  <label for="ttsLanguageSelect" class="form-label">TTS Language</label>
+                  <select id="ttsLanguageSelect" class="form-select">
+                    <option value="hi" selected>Hindi (hi-IN)</option>
+                    <option value="en">English (en-IN / en-US)</option>
+                  </select>
+                </div>
+
+                <div class="form-group">
+                  <label for="ttsVoiceSelect" class="form-label">Neural Voice</label>
+                  <select id="ttsVoiceSelect" class="form-select">
+                    <option value="hi-IN-SwaraNeural" selected>⭐ Swara (Female, Hindi)</option>
+                    <option value="hi-IN-MadhurNeural">⭐ Madhur (Male, Hindi)</option>
+                    <option value="en-IN-NeerjaNeural">⭐ Neerja (Female, Indian English)</option>
+                    <option value="en-IN-PrabhatNeural">⭐ Prabhat (Male, Indian English)</option>
+                    <option value="en-US-JennyNeural">⭐ Jenny (Female, US English)</option>
+                    <option value="en-US-GuyNeural">⭐ Guy (Male, US English)</option>
+                  </select>
+                </div>
+
+                <!-- Voice Tone & Style Preset Dropdown + Quick Pills -->
+                <div class="form-group">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                    <label for="ttsToneSelect" class="form-label" style="margin-bottom: 0;">🎭 Tone & Emotion Style</label>
+                    <span class="text-xs text-muted" id="activeToneBadge">Normal / Default</span>
+                  </div>
+                  <select id="ttsToneSelect" class="form-select">
+                    <option value="normal" selected>🎙️ Default / Balanced (1.0x Speed, 1.0x Pitch)</option>
+                    <option value="storytelling">📖 Storytelling / Narrative (0.95x Speed, 0.95x Pitch)</option>
+                    <option value="dramatic">🎭 Dramatic / Cinema (0.85x Speed, 0.85x Pitch)</option>
+                    <option value="energetic">⚡ High Energy / Reels (1.30x Speed, 1.10x Pitch)</option>
+                    <option value="fastreels">🔥 Fast Narration / Shorts (1.60x Speed, 1.05x Pitch)</option>
+                    <option value="hyper2x">⏩ Ultra Speed 2.0x (2.00x Speed, 1.00x Pitch)</option>
+                    <option value="max25x">🚀 Maximum Speed 2.5x (2.50x Speed, 1.05x Pitch)</option>
+                    <option value="deep">📻 Deep Voice / Radio Host (0.90x Speed, 0.75x Pitch)</option>
+                    <option value="calm">🧘 Calm & Meditative (0.80x Speed, 0.90x Pitch)</option>
+                    <option value="news">📢 News Anchor / Broadcast (1.15x Speed, 1.05x Pitch)</option>
+                    <option value="casual">💬 Casual Conversation (1.10x Speed, 1.00x Pitch)</option>
+                    <option value="custom">⚙️ Custom (Manual Sliders)</option>
+                  </select>
+
+                  <div class="preset-pills" style="margin-top: 0.5rem;">
+                    <button type="button" class="preset-pill active" data-preset="normal" data-rate="1.0" data-pitch="1.0">🎙️ Natural</button>
+                    <button type="button" class="preset-pill" data-preset="storytelling" data-rate="0.95" data-pitch="0.95">📖 Story</button>
+                    <button type="button" class="preset-pill" data-preset="dramatic" data-rate="0.85" data-pitch="0.85">🎭 Dramatic</button>
+                    <button type="button" class="preset-pill" data-preset="energetic" data-rate="1.3" data-pitch="1.1">⚡ Reels</button>
+                    <button type="button" class="preset-pill" data-preset="fastreels" data-rate="1.6" data-pitch="1.05">🔥 1.6x</button>
+                    <button type="button" class="preset-pill" data-preset="hyper2x" data-rate="2.0" data-pitch="1.0">⏩ 2.0x</button>
+                    <button type="button" class="preset-pill" data-preset="max25x" data-rate="2.5" data-pitch="1.05">🚀 2.5x</button>
+                    <button type="button" class="preset-pill" data-preset="deep" data-rate="0.9" data-pitch="0.75">📻 Deep Voice</button>
+                  </div>
+                </div>
+
+                <!-- Speech Speed Slider (Over to 2x: 0.5x to 2.5x) -->
+                <div class="form-group" style="margin-top: 0.75rem;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <label for="ttsRateSlider" class="form-label" style="margin-bottom: 0;">
+                      ⚡ Speech Speed: <strong id="ttsRateDisplay">1.0x</strong>
+                    </label>
+                    <span class="text-xs text-muted" id="speedBadge">Normal Speed</span>
+                  </div>
+                  <input type="range" id="ttsRateSlider" min="0.5" max="2.5" step="0.05" value="1.0" class="range-slider" style="margin-top: 0.35rem;">
+                  <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.25rem; margin-top: 0.35rem;">
+                    <button type="button" class="speed-quick-btn" data-rate="0.75">0.75x</button>
+                    <button type="button" class="speed-quick-btn active" data-rate="1.0">1.0x</button>
+                    <button type="button" class="speed-quick-btn" data-rate="1.25">1.25x</button>
+                    <button type="button" class="speed-quick-btn" data-rate="1.5">1.5x</button>
+                    <button type="button" class="speed-quick-btn" data-rate="1.75">1.75x</button>
+                    <button type="button" class="speed-quick-btn" data-rate="2.0">2.0x ⚡</button>
+                    <button type="button" class="speed-quick-btn" data-rate="2.25">2.25x</button>
+                    <button type="button" class="speed-quick-btn" data-rate="2.5">2.5x 🚀</button>
+                  </div>
+                </div>
+
+                <!-- Voice Pitch Slider (Wide range: 0.5x to 1.6x) -->
+                <div class="form-group" style="margin-top: 0.75rem;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <label for="ttsPitchSlider" class="form-label" style="margin-bottom: 0;">
+                      🎵 Voice Pitch: <strong id="ttsPitchDisplay">1.0x</strong>
+                    </label>
+                    <span class="text-xs text-muted" id="pitchBadge">Natural Tone</span>
+                  </div>
+                  <input type="range" id="ttsPitchSlider" min="0.5" max="1.6" step="0.05" value="1.0" class="range-slider" style="margin-top: 0.35rem;">
+                  <div style="display: flex; flex-wrap: wrap; justify-content: space-between; gap: 0.25rem; margin-top: 0.35rem;">
+                    <button type="button" class="pitch-quick-btn" data-pitch="0.7">0.7x (Deep)</button>
+                    <button type="button" class="pitch-quick-btn" data-pitch="0.85">0.85x (Warm)</button>
+                    <button type="button" class="pitch-quick-btn active" data-pitch="1.0">1.0x (Natural)</button>
+                    <button type="button" class="pitch-quick-btn" data-pitch="1.15">1.15x (Bright)</button>
+                    <button type="button" class="pitch-quick-btn" data-pitch="1.3">1.3x (Youthful)</button>
+                    <button type="button" class="pitch-quick-btn" data-pitch="1.5">1.5x (High)</button>
+                  </div>
+                </div>
+
+                <!-- Volume / Loudness Slider -->
+                <div class="form-group" style="margin-top: 0.75rem;">
+                  <div style="display: flex; justify-content: space-between; align-items: center;">
+                    <label for="ttsVolumeSlider" class="form-label" style="margin-bottom: 0;">
+                      🔊 Voice Loudness: <strong id="ttsVolumeVal">100%</strong>
+                    </label>
+                  </div>
+                  <input type="range" id="ttsVolumeSlider" min="0.2" max="1.5" step="0.05" value="1.0" class="range-slider" style="margin-top: 0.35rem;">
+                </div>
+
+                <div class="tts-actions-row" style="margin-top: 1rem; display: flex; flex-wrap: wrap; gap: 0.5rem; align-items: center;">
+                  <button type="button" id="previewTtsVoiceBtn" class="btn btn-secondary btn-sm">
+                    🔊 Preview Voice (Sample)
+                  </button>
+                  <button type="button" id="stopVoicePreviewBtn" class="btn btn-secondary btn-sm hidden">
+                    ⏹️ Stop Preview
+                  </button>
+                  <button type="button" id="generateNeuralTtsBtn" class="btn btn-primary btn-sm">
+                    ✨ Generate Voice from Script
+                  </button>
+                </div>
+
+                <!-- Neural Voice Loaded Status Bar -->
+                <div id="ttsAudioPlayerPanel" class="audio-loaded-box hidden" style="margin-top: 1rem; padding: 0.85rem; border-radius: 8px; background: rgba(255,255,255,0.05); border: 1px solid var(--border-subtle); display: flex; align-items: center; justify-content: space-between;">
+                  <div style="display: flex; align-items: center; gap: 0.75rem;">
+                    <span style="font-size: 1.25rem;">🎵</span>
+                    <div>
+                      <div id="ttsAudioFileNameDisplay" style="font-weight: 600; font-size: 0.9rem;">tts_voice.wav</div>
+                      <div class="text-muted text-xs"><span id="ttsAudioDurationDisplay">00:00</span> duration &middot; Neural Voice Active ✓</div>
+                    </div>
+                  </div>
+                  <div style="display: flex; gap: 0.5rem; align-items: center;">
+                    <button type="button" id="playTtsPreviewAudioBtn" class="btn btn-xs btn-primary">▶ Play Voice</button>
+                    <button type="button" id="stopTtsPreviewAudioBtn" class="btn btn-xs btn-secondary hidden">⏹ Stop</button>
+                  </div>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="step-nav-bar">
+            <button type="button" id="backToStep1Btn" class="btn btn-secondary">
+              ← Back to Source & Frames
+            </button>
+            <button type="button" id="goToStep3Btn" class="btn btn-primary btn-lg">
+              Continue to Step 3: Studio & Export →
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================== -->
+      <!-- STEP 3: STUDIO & EXPORT                        -->
+      <!-- ============================================== -->
+      <section id="step3Section" class="wizard-section">
+        <div class="section-container">
+          <div class="section-intro">
+            <h2>Step 3: Studio & Export</h2>
+            <p>Review the Ken Burns motion preview, customize subtitle styling and transitions, and render high-resolution MP4 video.</p>
+          </div>
+
+          <!-- Studio Toolbar: Aspect Ratio & Duration -->
+          <div class="studio-top-toolbar">
+            <div class="aspect-ratio-selector">
+              <span class="control-label">Aspect Ratio:</span>
+              <div class="aspect-pills-bar" id="studioRatioPills">
+                <button type="button" class="aspect-pill active" id="ratio16x9Btn" data-ratio="16:9">🖥️ 16:9 Landscape</button>
+                <button type="button" class="aspect-pill" id="ratio9x16Btn" data-ratio="9:16">📱 9:16 Vertical (Shorts/Reels)</button>
+                <button type="button" class="aspect-pill" id="ratio720pBtn" data-ratio="16:9-720p">📺 720p HD</button>
+              </div>
+            </div>
+
+            <div class="duration-config">
+              <span class="control-label">Duration:</span>
+              <select id="durationModeSelect" class="form-select form-select-sm">
+                <option value="match-voice" selected>Match Voice-Over Length</option>
+                <option value="60">60 Seconds</option>
+                <option value="90">90 Seconds</option>
+                <option value="120">120 Seconds</option>
+                <option value="custom">Custom Duration...</option>
+              </select>
+              <div id="customDurationInputGroup" class="hidden">
+                <input type="number" id="customDurationSeconds" min="10" max="3600" value="60" class="form-input form-input-xs" style="width: 70px;">
+                <span class="unit-text">s</span>
+              </div>
+            </div>
+          </div>
+
+          <!-- Studio Main Stage -->
+          <div class="studio-stage-layout">
+            <!-- Left: Video Canvas Player -->
+            <div class="player-stage-column">
+              <div class="canvas-viewport" id="canvasViewport">
+                <canvas id="previewCanvas" width="1920" height="1080"></canvas>
+                <div class="canvas-badge-overlay">
+                  <span id="canvasResBadge">1920x1080 &middot; 30fps</span>
+                </div>
+              </div>
+
+              <!-- Transport Controls Bar -->
+              <div class="transport-bar">
+                <div class="transport-left">
+                  <button type="button" id="restartBtn" class="control-icon-btn" title="Restart (00:00)">⏮️</button>
+                  <button type="button" id="skipBack5Btn" class="control-icon-btn" title="Skip -5s">⏪</button>
+                  <button type="button" id="playPauseBtn" class="play-main-btn" title="Play / Pause (Spacebar)">
+                    <span id="playIcon">▶</span>
+                    <span id="pauseIcon" class="hidden">⏸</span>
+                  </button>
+                  <button type="button" id="skipForward5Btn" class="control-icon-btn" title="Skip +5s">⏩</button>
+                  <div class="time-readout">
+                    <span id="currentTimeDisplay">00:00.0</span> / <span id="totalDurationDisplay">00:00.0</span>
+                  </div>
+                </div>
+
+                <div class="transport-right">
+                  <button type="button" id="toggleMutePreviewBtn" class="control-icon-btn" title="Mute/Unmute">
+                    <span id="unmutedIcon">🔊</span>
+                    <span id="mutedIcon" class="hidden">🔇</span>
+                  </button>
+                  <input type="range" id="previewVolumeSlider" min="0" max="1" step="0.05" value="1" class="volume-slider">
+                  <button type="button" id="fullscreenCanvasBtn" class="control-icon-btn" title="Fullscreen">⛶</button>
+                </div>
+              </div>
+
+              <!-- Interactive Timeline -->
+              <div class="timeline-container">
+                <div class="timeline-header-bar">
+                  <span class="timeline-title">Interactive Motion Timeline</span>
+                  <div class="timeline-zoom">
+                    <button type="button" id="timelineZoomOutBtn" class="btn btn-xs btn-ghost">- Zoom</button>
+                    <button type="button" id="timelineZoomInBtn" class="btn btn-xs btn-ghost">+ Zoom</button>
+                  </div>
+                </div>
+                <div class="timeline-tracks-wrapper" id="timelineTracksWrapper" style="position: relative; overflow-x: auto; padding: 0.5rem 0;">
+                  <div id="timelinePlayhead" class="timeline-playhead" style="position: absolute; top: 0; bottom: 0; width: 2px; background: #ef4444; z-index: 20; pointer-events: none; left: 0%;">
+                    <div class="playhead-head" style="width: 10px; height: 10px; background: #ef4444; border-radius: 50%; margin-left: -4px;"></div>
+                  </div>
+                  <div class="track-row">
+                    <div class="track-label">Photos</div>
+                    <div class="track-content" id="photoTrackContent"></div>
+                  </div>
+                  <div class="track-row">
+                    <div class="track-label">Captions</div>
+                    <div class="track-content" id="captionTrackContent"></div>
+                  </div>
+                  <div class="track-row">
+                    <div class="track-label">Voice</div>
+                    <div class="track-content" id="audioTrackContent"></div>
+                  </div>
+                  <div style="margin-top: 0.5rem;">
+                    <input type="range" id="timelineSlider" min="1.05" max="1.5" step="0.05" value="1.25" class="range-slider" style="width: 100%; display: none;">
+                  </div>
+                </div>
+              </div>
+            </div>
+
+            <!-- Right Column: Settings & Animation Customization -->
+            <div class="customizer-column">
+              <div class="card customizer-card">
+                <div class="card-header">
+                  <h3>Motion & Caption Styling</h3>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Ken Burns Max Zoom (<span id="zoomFactorVal">1.25x</span>)</label>
+                  <input type="range" id="zoomFactorSlider" min="1.05" max="1.5" step="0.05" value="1.25" class="range-slider">
+                </div>
+
+                <div class="form-row-2">
+                  <div class="form-group">
+                    <label class="form-label">Min Photo Time</label>
+                    <input type="range" id="photoMinDurationSlider" min="2" max="6" step="0.5" value="4" class="range-slider">
+                  </div>
+                  <div class="form-group">
+                    <label class="form-label">Max Photo Time</label>
+                    <input type="range" id="photoMaxDurationSlider" min="5" max="12" step="0.5" value="8" class="range-slider">
+                  </div>
+                </div>
+
+                <div class="form-group">
+                  <label class="form-label">Transition Duration (<span id="transitionDurVal">0.6s</span>)</label>
+                  <input type="range" id="transitionDurationSlider" min="0.2" max="1.5" step="0.1" value="0.6" class="range-slider">
+                </div>
+
+                <div class="form-group">
+                  <label for="transitionTypeSelect" class="form-label">Transition Effect</label>
+                  <select id="transitionTypeSelect" class="form-select">
+                    <option value="crossfade" selected>Crossfade (Smooth Dissolve)</option>
+                    <option value="dip-to-black">Dip to Black</option>
+                    <option value="none">Cut (Instant)</option>
+                  </select>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <!-- Video Exporter Card -->
+          <div class="export-actions-card" style="margin-top: 1.5rem;">
+            <div class="export-primary-row">
+              <div class="export-callout">
+                <h3>🎬 Complete Video Delivery</h3>
+                <p>Render high-resolution video with burned-in subtitles and synchronized voice narration.</p>
+              </div>
+              <div class="export-btns-group">
+                <button type="button" id="exportMp4Btn" class="btn btn-primary btn-lg">
+                  ⚡ Render MP4 Video (WebCodecs)
+                </button>
+                <button type="button" id="exportBothFormatsBtn" class="btn btn-secondary btn-lg">
+                  ⚡ Export Both Formats (16:9 & 9:16)
+                </button>
+                <button type="button" id="downloadZipBtn" class="btn btn-outline btn-lg">
+                  📦 Download ZIP Bundle
+                </button>
+              </div>
+            </div>
+
+            <div class="standalone-export-links">
+              <span>Standalone Exports:</span>
+              <button type="button" id="downloadSrtBtn" class="btn btn-xs btn-outline">Captions .SRT</button>
+              <button type="button" id="downloadVttBtn" class="btn btn-xs btn-outline">Captions .VTT</button>
+              <button type="button" id="downloadTxtBtn" class="btn btn-xs btn-outline">Script .TXT</button>
+              <button type="button" id="downloadJsonBtn" class="btn btn-xs btn-outline">Project .JSON</button>
+            </div>
+          </div>
+
+          <div class="step-nav-bar">
+            <button type="button" id="backToStep2Btn" class="btn btn-secondary">
+              ← Back to Voice & Script
+            </button>
+            <button type="button" id="goToStep4Btn" class="btn btn-primary btn-lg">
+              Continue to Step 4: Publish Portal →
+            </button>
+          </div>
+        </div>
+      </section>
+
+      <!-- ============================================== -->
+      <!-- STEP 4: PUBLISH PORTAL                         -->
+      <!-- ============================================== -->
+      <section id="step4Section" class="wizard-section">
+        <div class="section-container">
+          <div class="section-intro">
+            <h2>Step 4: Publish Portal</h2>
+            <p>Generate copy-paste-ready viral metadata for YouTube and Facebook, powered by Google Gemini from your script.</p>
+          </div>
+
+          <!-- Friendly setup banner when GEMINI_API_KEY is not in .env -->
+          <div id="geminiMissingBanner" class="banner-notice warning hidden">
+            <span>⚠️ <strong>Gemini Key Required:</strong> Add <code>GEMINI_API_KEY=your_key</code> to your <code>.env</code> file and restart the server (<code>npm start</code>).</span>
+          </div>
+
+          <!-- Script changed alert banner -->
+          <div id="portalScriptChangedBanner" class="banner-notice info hidden">
+            <span>ℹ️ <strong>Script changed:</strong> Your narration script in Step 2 was updated since metadata was last generated.</span>
+            <button type="button" id="portalScriptChangedRegenBtn" class="btn btn-xs btn-primary">Regenerate Now</button>
+          </div>
+
+          <!-- Empty script warning -->
+          <div id="portalScriptEmptyWarning" class="banner-notice warning hidden">
+            <span>⚠️ <strong>No script found:</strong> Please write or paste your narration script in Step 2 before generating metadata.</span>
+          </div>
+
+          <!-- Script Used Summary Card -->
+          <div class="portal-script-summary-box" id="portalScriptUsedSummary">
+            <div class="portal-script-content">
+              <div class="portal-script-label">
+                <span>📝 Script Used for Metadata</span>
+                <span class="badge badge-accent" id="portalScriptWordCount">0 words</span>
+                <span id="portalKeywordMatchBadge" class="badge badge-success hidden">🎯 Keyword match 0/10</span>
+              </div>
+              <div class="portal-script-snippet" id="portalScriptSnippet">
+                Loading script summary...
+              </div>
+            </div>
+            <div class="portal-script-actions">
+              <a href="#" id="portalEditScriptLink" class="btn btn-xs btn-outline">✏️ Edit Script (Step 2)</a>
+            </div>
+          </div>
+
+          <!-- Portal Card: Settings & Generation Controls -->
+          <div class="portal-card">
+            <div class="card-header">
+              <div class="title-with-badge">
+                <h3>Publish Settings</h3>
+                <span class="badge badge-accent">Gemini Guided</span>
+              </div>
+            </div>
+
+            <!-- Settings Row -->
+            <div class="portal-settings-grid">
+              <div class="form-group">
+                <label for="portalLangSelect" class="form-label">Metadata Language</label>
+                <select id="portalLangSelect" class="form-select">
+                  <option value="Hindi" selected>Hindi (हिंदी)</option>
+                  <option value="English">English</option>
+                  <option value="Hinglish">Hinglish</option>
+                  <option value="auto">Auto-detect from script</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="portalToneSelect" class="form-label">Tone</label>
+                <select id="portalToneSelect" class="form-select">
+                  <option value="Curious" selected>Curious / Viral</option>
+                  <option value="Emotional">Emotional (भावुक)</option>
+                  <option value="Educational">Educational (शिक्षाप्रद)</option>
+                  <option value="Dramatic">Dramatic (रोमांचक)</option>
+                  <option value="Funny">Funny / Entertaining</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="portalVideoTypeSelect" class="form-label">Video Type</label>
+                <select id="portalVideoTypeSelect" class="form-select">
+                  <option value="Shorts" selected>Shorts / Reel (Vertical)</option>
+                  <option value="Long video">Long Video (16:9 Landscape)</option>
+                  <option value="Reel">Facebook Reel</option>
+                </select>
+              </div>
+
+              <div class="form-group">
+                <label for="portalNicheInput" class="form-label">Niche / Topic</label>
+                <input type="text" id="portalNicheInput" class="form-input" placeholder="e.g. History, Motivation, Mystery">
+              </div>
+
+              <div class="form-group">
+                <label for="portalAudienceInput" class="form-label">Target Audience</label>
+                <input type="text" id="portalAudienceInput" class="form-input" placeholder="e.g. Youth, Hindi speakers, Students">
+              </div>
+
+              <div class="form-group">
+                <label for="portalPlatformSelect" class="form-label">Generate For</label>
+                <select id="portalPlatformSelect" class="form-select">
+                  <option value="both" selected>Both (YouTube + Facebook)</option>
+                  <option value="youtube">YouTube Only</option>
+                  <option value="facebook">Facebook Only</option>
+                </select>
+              </div>
+            </div>
+
+            <!-- Generation Action Row -->
+            <div class="portal-action-row">
+              <div class="portal-generate-btns">
+                <button type="button" id="portalGenerateBtn" class="btn btn-primary btn-lg">
+                  ✨ Generate with Gemini
+                </button>
+                <button type="button" id="portalRegenerateBtn" class="btn btn-secondary btn-lg" disabled>
+                  🔄 Regenerate
+                </button>
+              </div>
+            </div>
+
+            <!-- Loading Skeleton -->
+            <div id="portalSkeletonLoader" class="portal-skeleton hidden">
+              <div class="skeleton-bar skeleton-bar-title"></div>
+              <div class="skeleton-bar skeleton-bar-line1"></div>
+              <div class="skeleton-bar skeleton-bar-line2"></div>
+              <div class="skeleton-bar skeleton-bar-line3"></div>
+            </div>
+
+            <!-- Results Container with Tabs -->
+            <div id="portalResultsContainer" class="hidden">
+              <div class="card-header" style="border-top: 1px solid var(--border-subtle); padding-top: 1.25rem;">
+                <div class="title-with-badge">
+                  <h3>Generated Metadata</h3>
+                </div>
+                <!-- Platform Tabs -->
+                <div class="publish-tabs">
+                  <button type="button" class="tab-btn active" id="portalTabYtBtn">
+                    🔴 YouTube & Shorts
+                  </button>
+                  <button type="button" class="tab-btn" id="portalTabFbBtn">
+                    🔵 Facebook & Reels
+                  </button>
+                </div>
+              </div>
+
+              <!-- YouTube Tab Content -->
+              <div class="publish-panel active" id="portalPanelYt">
+                <div class="publish-panel-top">
+                  <span class="subtext">Curiosity-driven titles & hook-optimized description for high YouTube CTR.</span>
+                  <div style="display: flex; gap: 0.5rem;">
+                    <button type="button" id="ytCopyAllBtn" class="btn btn-xs btn-secondary">📋 Copy All YouTube</button>
+                    <button type="button" id="ytDownloadTxtBtn" class="btn btn-xs btn-outline">💾 Download .txt</button>
+                  </div>
+                </div>
+
+                <!-- 1. Titles List (5 options with radio selection) -->
+                <div class="publish-field-group">
+                  <div class="field-header">
+                    <label class="form-label">5 Titles (<= 70 chars &middot; keyword near start)</label>
+                    <button type="button" id="ytCopyTitleBtn" class="btn btn-xs btn-ghost">Copy Title</button>
+                  </div>
+                  <div class="yt-titles-list" id="ytTitlesList"></div>
+                </div>
+
+                <!-- 2. Description -->
+                <div class="publish-field-group">
+                  <div class="field-header">
+                    <label for="ytDescInput" class="form-label">Description (Formatted &middot; Hook, Highlights, Chapters &amp; CTA)</label>
+                    <div style="display: flex; gap: 0.35rem;">
+                      <button type="button" id="ytFormatDescBtn" class="btn btn-xs btn-outline">✨ Auto-Format</button>
+                      <button type="button" id="ytCopyDescBtn" class="btn btn-xs btn-ghost">Copy Description</button>
+                    </div>
+                  </div>
+                  <textarea id="ytDescInput" class="form-textarea hindi-font" rows="8" maxlength="5000"></textarea>
+                  <div class="counter-row">
+                    <span class="char-counter" id="ytDescCounter">0 / 5000 characters</span>
+                  </div>
+                </div>
+
+                <!-- 3. Hashtags -->
+                <div class="publish-field-group">
+                  <div class="field-header">
+                    <label class="form-label">🔥 Trending Hashtags (20+ viral tags &middot; editable chips &middot; includes #Shorts)</label>
+                    <div style="display: flex; gap: 0.35rem;">
+                      <button type="button" id="ytAddTrendingBtn" class="btn btn-xs btn-outline">🔥 + Trending Pack</button>
+                      <button type="button" id="ytCopyHashtagsBtn" class="btn btn-xs btn-ghost">Copy All</button>
+                    </div>
+                  </div>
+                  <div class="hashtags-chips-container" id="ytHashtagsContainer"></div>
+                  <div class="add-hashtag-row">
+                    <input type="text" id="ytAddHashtagInput" class="form-input form-input-xs" placeholder="#AddCustomTag">
+                    <button type="button" id="ytAddHashtagBtn" class="btn btn-xs btn-outline">+ Add</button>
+                  </div>
+                </div>
+
+                <!-- 4. Tags -->
+                <div class="publish-field-group">
+                  <div class="field-header">
+                    <label for="ytTagsInput" class="form-label">Keyword Tags (Total <= 450 characters)</label>
+                    <button type="button" id="ytCopyTagsBtn" class="btn btn-xs btn-ghost">Copy Tags</button>
+                  </div>
+                  <textarea id="ytTagsInput" class="form-textarea form-textarea-sm" rows="2" maxlength="500"></textarea>
+                  <div class="counter-row">
+                    <span class="char-counter" id="ytTagsCounter">0 / 450 characters</span>
+                  </div>
+                </div>
+
+                <!-- 5. Pinned Comment -->
+                <div class="publish-field-group">
+                  <div class="field-header">
+                    <label for="ytPinnedCommentInput" class="form-label">Community Pinned Comment (Sparks Discussion)</label>
+                    <button type="button" id="ytCopyPinnedBtn" class="btn btn-xs btn-ghost">Copy Comment</button>
+                  </div>
+                  <input type="text" id="ytPinnedCommentInput" class="form-input form-input-sm hindi-font">
+                </div>
+
+                <div class="portal-external-links">
+                  <button type="button" id="openYtStudioBtn" class="btn btn-sm btn-outline">
+                    🚀 Open YouTube Studio Upload (studio.youtube.com)
+                  </button>
+                </div>
+              </div>
+
+              <!-- Facebook Tab Content -->
+              <div class="publish-panel hidden" id="portalPanelFb">
+                <div class="publish-panel-top">
+                  <span class="subtext">Formatted specifically for organic viral reach on Facebook Reels & Watch.</span>
+                  <div style="display: flex; gap: 0.5rem;">
+                    <button type="button" id="copyAllFbBtn" class="btn btn-xs btn-secondary">📋 Copy All Facebook</button>
+                    <button type="button" id="downloadFbTxtBtn" class="btn btn-xs btn-outline">💾 Download .txt</button>
+                  </div>
+                </div>
+
+                <!-- 1. Facebook Headlines (3 options) -->
+                <div class="publish-field-group">
+                  <div class="field-header">
+                    <label class="form-label">3 Caption / Headline Options (<= 100 characters)</label>
+                    <button type="button" id="copyFbHeadlineBtn" class="btn btn-xs btn-ghost">Copy Headline</button>
+                  </div>
+                  <div class="yt-titles-list" id="fbHeadlinesList"></div>
+                </div>
+
+                <!-- 2. Post Text -->
+                <div class="publish-field-group">
+                  <div class="field-header">
+                    <label for="fbPostInput" class="form-label">Facebook Post Text (Formatted &middot; Hook, Story &amp; CTA)</label>
+                    <div style="display: flex; gap: 0.35rem;">
+                      <button type="button" id="fbFormatPostBtn" class="btn btn-xs btn-outline">✨ Auto-Format</button>
+                      <button type="button" id="copyFbPostBtn" class="btn btn-xs btn-ghost">Copy Post Text</button>
+                    </div>
+                  </div>
+                  <textarea id="fbPostInput" class="form-textarea hindi-font" rows="8"></textarea>
+                  <div class="counter-row">
+                    <span class="char-counter" id="fbPostCounter">0 characters</span>
+                  </div>
+                </div>
+
+                <!-- 3. Video Title & Description for Reels -->
+                <div class="form-row-2">
+                  <div class="publish-field-group">
+                    <div class="field-header">
+                      <label for="fbVideoTitleInput" class="form-label">Video Title (Reel / Upload)</label>
+                      <button type="button" id="copyFbTitleBtn" class="btn btn-xs btn-ghost">Copy Title</button>
+                    </div>
+                    <input type="text" id="fbVideoTitleInput" class="form-input form-input-sm hindi-font">
+                  </div>
+                  <div class="publish-field-group">
+                    <div class="field-header">
+                      <label for="fbVideoDescInput" class="form-label">Video Description</label>
+                      <button type="button" id="copyFbDescBtn" class="btn btn-xs btn-ghost">Copy Desc</button>
+                    </div>
+                    <input type="text" id="fbVideoDescInput" class="form-input form-input-sm hindi-font">
+                  </div>
+                </div>
+
+                <!-- 4. Hashtags -->
+                <div class="publish-field-group">
+                  <div class="field-header">
+                    <label class="form-label">🔥 Trending Hashtags (20+ viral tags for reels &amp; algorithmic reach)</label>
+                    <div style="display: flex; gap: 0.35rem;">
+                      <button type="button" id="fbAddTrendingBtn" class="btn btn-xs btn-outline">🔥 + Trending Pack</button>
+                      <button type="button" id="copyFbHashtagsBtn" class="btn btn-xs btn-ghost">Copy All</button>
+                    </div>
+                  </div>
+                  <div class="hashtags-chips-container" id="fbHashtagsContainer"></div>
+                  <div class="add-hashtag-row">
+                    <input type="text" id="fbAddHashtagInput" class="form-input form-input-xs" placeholder="#AddTag">
+                    <button type="button" id="fbAddHashtagBtn" class="btn btn-xs btn-outline">+ Add</button>
+                  </div>
+                </div>
+
+                <!-- 5. First Comment -->
+                <div class="publish-field-group">
+                  <div class="field-header">
+                    <label for="fbFirstCommentInput" class="form-label">First Comment (Links & Community Engagement)</label>
+                    <button type="button" id="copyFbCommentBtn" class="btn btn-xs btn-ghost">Copy Comment</button>
+                  </div>
+                  <input type="text" id="fbFirstCommentInput" class="form-input form-input-sm hindi-font">
+                </div>
+
+                <div class="portal-external-links">
+                  <button type="button" id="openFbComposerBtn" class="btn btn-sm btn-outline">
+                    🚀 Open Facebook Composer (facebook.com)
+                  </button>
+                  <button type="button" id="openFbReelsBtn" class="btn btn-sm btn-outline">
+                    🚀 Open Facebook Creator Studio
+                  </button>
+                </div>
+              </div>
+            </div>
+          </div>
+
+          <div class="step-nav-bar">
+            <button type="button" id="backToStep3Btn" class="btn btn-secondary">
+              ← Back to Studio
+            </button>
+          </div>
+        </div>
+      </section>
+
+    </main>
+
+    <!-- Mobile Sticky Action Bar -->
+    <div class="mobile-action-bar" id="mobileActionBar">
+      <button type="button" id="mobileBackBtn" class="btn btn-secondary btn-sm">
+        ← Back
+      </button>
+      <span class="mobile-step-name" id="mobileStepName">Step 1: Source & Frames</span>
+      <button type="button" id="mobileNextBtn" class="btn btn-primary btn-sm">
+        Next →
+      </button>
+    </div>
+  </div>
+
+  <!-- ============================================== -->
+  <!-- MODALS & OVERLAYS                              -->
+  <!-- ============================================== -->
+
+  <!-- 1. My Projects Modal -->
+  <div id="projectsModal" class="modal-backdrop hidden">
+    <div class="modal-card modal-lg">
+      <div class="modal-header">
+        <h4>📁 My Projects (Saved in IndexedDB)</h4>
+        <button type="button" id="closeProjectsModalBtn" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body">
+        <div class="modal-top-bar">
+          <p class="subtext">All your stories, voice recordings, and publish packs are saved locally on your device.</p>
+          <button type="button" id="newProjectBtn" class="btn btn-primary btn-sm">
+            ➕ New Story Project
+          </button>
+        </div>
+        <div id="projectsListContainer" class="projects-list-container">
+          <!-- Populated dynamically -->
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 2. In-Page Confirmation Modal -->
+  <div id="confirmModal" class="modal-backdrop hidden">
+    <div class="modal-card modal-sm">
+      <div class="modal-header">
+        <h4 id="confirmModalTitle">Are you sure?</h4>
+      </div>
+      <div class="modal-body">
+        <p id="confirmModalMsg">Do you really want to delete this project? This action cannot be undone.</p>
+      </div>
+      <div class="modal-footer">
+        <button type="button" id="confirmModalCancelBtn" class="btn btn-secondary">Cancel</button>
+        <button type="button" id="confirmModalActionBtn" class="btn btn-danger">Confirm Delete</button>
+      </div>
+    </div>
+  </div>
+
+  <!-- 3. Export Progress Overlay Modal -->
+  <div id="exportProgressModal" class="modal-backdrop hidden">
+    <div class="modal-card modal-progress-card">
+      <div class="modal-header">
+        <div class="progress-title-row">
+          <div class="spinner"></div>
+          <h4 id="exportProgressTitle">Rendering Video...</h4>
+        </div>
+        <button type="button" id="cancelExportBtn" class="btn btn-xs btn-danger">Cancel Export</button>
+      </div>
+      <div class="modal-body">
+        <div class="progress-bar-container">
+          <div id="exportProgressBar" class="progress-bar-fill" style="width: 0%"></div>
+        </div>
+
+        <div class="export-stats-grid">
+          <div class="stat-box">
+            <span class="lbl">Progress</span>
+            <span class="val" id="exportPercentDisplay">0%</span>
+          </div>
+          <div class="stat-box">
+            <span class="lbl">Frame</span>
+            <span class="val" id="exportFrameDisplay">0 / 0</span>
+          </div>
+          <div class="stat-box">
+            <span class="lbl">Elapsed</span>
+            <span class="val" id="exportElapsedDisplay">00:00</span>
+          </div>
+          <div class="stat-box">
+            <span class="lbl">Est. Remaining</span>
+            <span class="val" id="exportEtaDisplay">Calculating...</span>
+          </div>
+        </div>
+
+        <div class="export-preview-thumbnail-box">
+          <canvas id="exportMiniThumbCanvas" width="320" height="180"></canvas>
+          <span class="thumb-label">Current Render Frame</span>
+        </div>
+
+        <div class="export-warning-note">
+          ⚠️ Please keep this browser tab active and visible during video export.
+        </div>
+      </div>
+    </div>
+  </div>
+
+  <!-- 4. Fullscreen Frame Preview Modal -->
+  <div id="framePreviewModal" class="modal-backdrop hidden">
+    <div class="modal-card">
+      <div class="modal-header">
+        <h4 id="previewModalTitle">Photo Preview</h4>
+        <button type="button" id="closeFrameModalBtn" class="modal-close">&times;</button>
+      </div>
+      <div class="modal-body text-center">
+        <img id="modalPreviewImg" src="" alt="Frame preview" class="modal-large-img">
+        <div class="modal-meta-row" id="modalMetaRow"></div>
+      </div>
+    </div>
+  </div>
+
+  <!-- Toast Notification Container -->
+  <div id="toastContainer" class="toast-container"></div>
+
+  <!-- Application Modules -->
+  <script type="module" src="./js/app.js"></script>
+</body>
+</html>
