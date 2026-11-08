@@ -221,79 +221,112 @@ async function synthesizeChunk(text, voice = DEFAULT_VOICE, rate = 1.0, pitch = 
 }
 
 /**
+ * Parses JSON body from either pre-parsed req.body (e.g. Vercel) or incoming stream (Node.js)
+ */
+export async function parseJsonBody(req, maxBytes = 10 * 1024 * 1024) {
+  if (req.body !== undefined && req.body !== null) {
+    if (typeof req.body === 'object') return req.body;
+    if (typeof req.body === 'string') {
+      try { return JSON.parse(req.body); } catch (e) { return {}; }
+    }
+  }
+
+  return new Promise((resolve, reject) => {
+    let body = '';
+    let tooLarge = false;
+
+    req.on('data', (chunk) => {
+      body += chunk;
+      if (body.length > maxBytes) {
+        tooLarge = true;
+        req.destroy();
+      }
+    });
+
+    req.on('end', () => {
+      if (tooLarge) {
+        const err = new Error('Payload Too Large');
+        err.statusCode = 413;
+        return reject(err);
+      }
+      try {
+        resolve(body ? JSON.parse(body) : {});
+      } catch (err) {
+        resolve({});
+      }
+    });
+
+    req.on('error', reject);
+  });
+}
+
+/**
  * Handles POST /api/tts
  */
-async function handleTtsRequest(req, res) {
-  let body = '';
-  req.on('data', (chunk) => {
-    body += chunk;
-    if (body.length > 10 * 1024 * 1024) {
-      req.destroy();
-    }
-  });
-
-  req.on('end', async () => {
-    try {
-      const data = JSON.parse(body || '{}');
-      const text = (data.text || '').trim();
-      if (!text) {
-        res.writeHead(400, { 'Content-Type': 'application/json' });
-        return res.end(JSON.stringify({ error: 'Text parameter is required.' }));
-      }
-
-      let voice = data.voice || DEFAULT_VOICE;
-      const rate = data.rate !== undefined ? data.rate : 1.0;
-      const pitch = data.pitch !== undefined ? data.pitch : 1.0;
-      const volume = data.volume !== undefined ? data.volume : 1.0;
-
-      // Smart language matching: if text is Hindi and voice is an English-only voice, use Hindi voice
-      const hasDevanagari = /[\u0900-\u097F]/.test(text);
-      if (hasDevanagari && voice.startsWith('en-')) {
-        console.log(`[TTS] Text contains Hindi characters; switching voice from ${voice} to hi-IN-SwaraNeural.`);
-        voice = 'hi-IN-SwaraNeural';
-      }
-
-      console.log(`[TTS] Synthesizing (${voice}, rate=${rate}, pitch=${pitch}, vol=${volume}): "${text.slice(0, 60)}..."`);
-
-      const chunks = splitTextIntoChunks(text, 500);
-      const audioBuffers = [];
-
-      for (let i = 0; i < chunks.length; i++) {
-        let audioBuf = await synthesizeChunk(chunks[i], voice, rate, pitch, volume);
-        if (audioBuf.length === 0 && voice !== DEFAULT_VOICE) {
-          // Retry with default voice
-          console.warn(`[TTS] Chunk returned 0 bytes with ${voice}. Retrying with default ${DEFAULT_VOICE}...`);
-          audioBuf = await synthesizeChunk(chunks[i], DEFAULT_VOICE, rate, pitch, volume);
-        }
-        audioBuffers.push(audioBuf);
-      }
-
-      const combinedAudio = Buffer.concat(audioBuffers);
-      if (combinedAudio.length === 0) {
-        throw new Error('TTS service generated empty audio.');
-      }
-
-      res.writeHead(200, {
-        'Content-Type': 'audio/mpeg',
-        'Content-Length': combinedAudio.length,
-        'Access-Control-Allow-Origin': '*',
-        'Access-Control-Allow-Methods': 'POST, OPTIONS',
-        'Access-Control-Allow-Headers': 'Content-Type'
-      });
-      res.end(combinedAudio);
-    } catch (err) {
-      console.error('[TTS Error]', err);
-      const humanError = mapTtsErrorMessage(err);
-      res.writeHead(500, {
+export async function handleTtsRequest(req, res) {
+  try {
+    const data = await parseJsonBody(req, 10 * 1024 * 1024);
+    const text = (data.text || '').trim();
+    if (!text) {
+      res.writeHead(400, {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
       });
-      res.end(JSON.stringify({
-        error: humanError,
-        detail: err.message || 'Unknown error'
-      }));
+      return res.end(JSON.stringify({ error: 'Text parameter is required.' }));
     }
-  });
+
+    let voice = data.voice || DEFAULT_VOICE;
+    const rate = data.rate !== undefined ? data.rate : 1.0;
+    const pitch = data.pitch !== undefined ? data.pitch : 1.0;
+    const volume = data.volume !== undefined ? data.volume : 1.0;
+
+    // Smart language matching: if text is Hindi and voice is an English-only voice, use Hindi voice
+    const hasDevanagari = /[\u0900-\u097F]/.test(text);
+    if (hasDevanagari && voice.startsWith('en-')) {
+      console.log(`[TTS] Text contains Hindi characters; switching voice from ${voice} to hi-IN-SwaraNeural.`);
+      voice = 'hi-IN-SwaraNeural';
+    }
+
+    console.log(`[TTS] Synthesizing (${voice}, rate=${rate}, pitch=${pitch}, vol=${volume}): "${text.slice(0, 60)}..."`);
+
+    const chunks = splitTextIntoChunks(text, 500);
+    const audioBuffers = [];
+
+    for (let i = 0; i < chunks.length; i++) {
+      let audioBuf = await synthesizeChunk(chunks[i], voice, rate, pitch, volume);
+      if (audioBuf.length === 0 && voice !== DEFAULT_VOICE) {
+        // Retry with default voice
+        console.warn(`[TTS] Chunk returned 0 bytes with ${voice}. Retrying with default ${DEFAULT_VOICE}...`);
+        audioBuf = await synthesizeChunk(chunks[i], DEFAULT_VOICE, rate, pitch, volume);
+      }
+      audioBuffers.push(audioBuf);
+    }
+
+    const combinedAudio = Buffer.concat(audioBuffers);
+    if (combinedAudio.length === 0) {
+      throw new Error('TTS service generated empty audio.');
+    }
+
+    res.writeHead(200, {
+      'Content-Type': 'audio/mpeg',
+      'Content-Length': combinedAudio.length,
+      'Access-Control-Allow-Origin': '*',
+      'Access-Control-Allow-Methods': 'POST, OPTIONS',
+      'Access-Control-Allow-Headers': 'Content-Type'
+    });
+    res.end(combinedAudio);
+  } catch (err) {
+    console.error('[TTS Error]', err);
+    const humanError = mapTtsErrorMessage(err);
+    res.writeHead(err.statusCode || 500, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({
+      error: humanError,
+      detail: err.message || 'Unknown error'
+    }));
+  }
 }
 
 /**
@@ -612,79 +645,58 @@ ${truncatedScript}
  * Handles POST /api/generate-meta
  */
 export async function handleGenerateMetaRequest(req, res) {
-  let body = '';
-  let bodyTooLarge = false;
-
-  req.on('data', (chunk) => {
-    body += chunk;
-    if (body.length > 1024 * 1024) { // 1 MB cap
-      bodyTooLarge = true;
-      req.destroy();
-    }
-  });
-
-  req.on('end', async () => {
-    if (bodyTooLarge) {
-      res.writeHead(413, {
+  try {
+    if (!process.env.GEMINI_API_KEY) {
+      res.writeHead(500, {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
       });
-      return res.end(JSON.stringify({ error: 'Request body exceeds 1 MB limit' }));
+      return res.end(JSON.stringify({ error: 'GEMINI_API_KEY missing in .env' }));
     }
 
-    try {
-      if (!process.env.GEMINI_API_KEY) {
-        res.writeHead(500, {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        });
-        return res.end(JSON.stringify({ error: 'GEMINI_API_KEY missing in .env' }));
-      }
-
-      const data = JSON.parse(body || '{}');
-      const script = (data.script || '').trim();
-      if (!script) {
-        res.writeHead(400, {
-          'Content-Type': 'application/json',
-          'Access-Control-Allow-Origin': '*'
-        });
-        return res.end(JSON.stringify({ error: 'Script text is required' }));
-      }
-
-      const result = await callGeminiMetaAPI(data, 2);
-      res.writeHead(200, {
+    const data = await parseJsonBody(req, 1024 * 1024);
+    const script = (data.script || '').trim();
+    if (!script) {
+      res.writeHead(400, {
         'Content-Type': 'application/json',
         'Access-Control-Allow-Origin': '*'
       });
-      res.end(JSON.stringify(result));
-    } catch (err) {
-      console.error('[Generate-Meta Error]', err);
-      const isNetworkError =
-        err.code === 'ENOTFOUND' ||
-        err.code === 'ECONNREFUSED' ||
-        err.code === 'EAI_AGAIN' ||
-        err.cause?.code === 'ENOTFOUND' ||
-        (err.message && (
-          err.message.includes('fetch failed') ||
-          err.message.includes('ENOTFOUND') ||
-          err.message.includes('Cannot reach Gemini') ||
-          err.message.includes('network')
-        ));
-
-      let statusCode = err.statusCode || 500;
-      let message = err.message || 'Gemini metadata generation failed';
-      if (isNetworkError) {
-        statusCode = 503;
-        message = 'Cannot reach Gemini. Check your internet connection.';
-      }
-
-      res.writeHead(statusCode, {
-        'Content-Type': 'application/json',
-        'Access-Control-Allow-Origin': '*'
-      });
-      res.end(JSON.stringify({ error: message }));
+      return res.end(JSON.stringify({ error: 'Script text is required' }));
     }
-  });
+
+    const result = await callGeminiMetaAPI(data, 2);
+    res.writeHead(200, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify(result));
+  } catch (err) {
+    console.error('[Generate-Meta Error]', err);
+    const isNetworkError =
+      err.code === 'ENOTFOUND' ||
+      err.code === 'ECONNREFUSED' ||
+      err.code === 'EAI_AGAIN' ||
+      err.cause?.code === 'ENOTFOUND' ||
+      (err.message && (
+        err.message.includes('fetch failed') ||
+        err.message.includes('ENOTFOUND') ||
+        err.message.includes('Cannot reach Gemini') ||
+        err.message.includes('network')
+      ));
+
+    let statusCode = err.statusCode || 500;
+    let message = err.message || 'Gemini metadata generation failed';
+    if (isNetworkError) {
+      statusCode = 503;
+      message = 'Cannot reach Gemini. Check your internet connection.';
+    }
+
+    res.writeHead(statusCode, {
+      'Content-Type': 'application/json',
+      'Access-Control-Allow-Origin': '*'
+    });
+    res.end(JSON.stringify({ error: message }));
+  }
 }
 
 // Read optional GEMINI_API_KEY from .env or process.env
