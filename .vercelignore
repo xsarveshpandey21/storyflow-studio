@@ -1,0 +1,6 @@
+.env
+.git
+.github
+test_*.mjs
+scripts/zip.mjs
+README.md

@@ -7,3 +7,4 @@ export default function handler(req, res) {
     geminiConfigured: Boolean(process.env.GEMINI_API_KEY)
   }));
 }
+

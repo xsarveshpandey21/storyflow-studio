@@ -338,10 +338,16 @@ function serveStaticFile(req, res) {
     reqPath = '/index.html';
   }
 
-  const filePath = path.join(__dirname, reqPath);
+  // Resolve path from __dirname or fallback to process.cwd()
+  let baseDir = __dirname;
+  let filePath = path.join(baseDir, reqPath);
+  if (!fs.existsSync(filePath)) {
+    baseDir = process.cwd();
+    filePath = path.join(baseDir, reqPath);
+  }
 
   // Security check to avoid path traversal
-  if (!filePath.startsWith(__dirname)) {
+  if (!filePath.startsWith(baseDir)) {
     res.writeHead(403, { 'Content-Type': 'text/plain' });
     return res.end('Forbidden');
   }
@@ -789,4 +795,5 @@ if (isDirectRun) {
 }
 
 export { server, splitTextIntoChunks, synthesizeChunk };
+export default handleAppRequest;
 
