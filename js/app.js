@@ -1559,7 +1559,9 @@ class FrameFlowApp {
           if (frameIdx !== -1) {
             const [removed] = this.state.extractedFrames.splice(frameIdx, 1);
             if (removed && removed.previewUrl && typeof removed.previewUrl === 'string' && removed.previewUrl.startsWith('blob:')) {
-              try { URL.revokeObjectURL(removed.previewUrl); } catch (e) { }
+              setTimeout(() => {
+                try { URL.revokeObjectURL(removed.previewUrl); } catch (e) { }
+              }, 2000);
             }
             this.refreshGallery();
           }

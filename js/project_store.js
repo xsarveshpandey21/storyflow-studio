@@ -187,6 +187,15 @@ export class ProjectStore {
   }
 
   /**
+   * Alias for getBlob
+   * @param {string} key
+   * @returns {Promise<Blob|null>}
+   */
+  static async loadBlob(key) {
+    return this.getBlob(key);
+  }
+
+  /**
    * Deletes a Blob
    * @param {string} key 
    */
@@ -246,4 +255,8 @@ export class ProjectStore {
       });
     } catch (e) {}
   }
+}
+
+if (typeof window !== 'undefined') {
+  window.ProjectStore = ProjectStore;
 }

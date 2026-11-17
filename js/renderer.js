@@ -113,55 +113,79 @@ export class FrameRenderer {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
-    // Check if photo was already cropped and matches the selected frame size
+    // 1. Calculate Ken Burns progress across the segment duration
+    const startTime = segment?.startTime || 0;
+    const endTime = segment?.endTime || (startTime + (segment?.duration || 5));
+    const segDuration = Math.max(0.1, endTime - startTime);
+    const rawProgress = Math.max(0, Math.min(1, (t - startTime) / segDuration));
+    const progress = this.easeInOutSine(rawProgress);
+
+    // 2. Interpolate Zoom and Pan factors
+    const maxZoomLimit = state?.maxZoom || 1.25;
+    const zoomStart = segment?.zoomStart !== undefined ? segment.zoomStart : 1.0;
+    const zoomEnd = segment?.zoomEnd !== undefined ? segment.zoomEnd : maxZoomLimit;
+    const currentZoom = this.lerp(zoomStart, zoomEnd, progress);
+
+    const panXStart = segment?.panXStart !== undefined ? segment.panXStart : 0;
+    const panXEnd = segment?.panXEnd !== undefined ? segment.panXEnd : 0;
+    const panX = this.lerp(panXStart, panXEnd, progress);
+
+    const panYStart = segment?.panYStart !== undefined ? segment.panYStart : 0;
+    const panYEnd = segment?.panYEnd !== undefined ? segment.panYEnd : 0;
+    const panY = this.lerp(panYStart, panYEnd, progress);
+
+    // 3. Layout checks
     const imgAspect = img.width / img.height;
     const canvasAspect = width / height;
-    const isRatioMatch = Math.abs(imgAspect - canvasAspect) / canvasAspect < 0.02;
-    const isCropped = segment?.photo ? segment.photo.isCropped !== false : true;
-    const matchesSelectedFrame = isCropped && isRatioMatch;
+    const isRatioMatch = Math.abs(imgAspect - canvasAspect) / canvasAspect < 0.05;
+    const isVerticalCanvas = height > width;
+    const isHorizontalPhoto = img.width > img.height;
+    const useBlurBg = state?.verticalModeLayout === 'blur-bg' || (isVerticalCanvas && isHorizontalPhoto && !isRatioMatch);
 
-    // 1. Photo already cropped to the selected frame size: draw as-is.
-    // Fill the canvas exactly with no extra auto-crop, no auto zoom-in that cuts edges,
-    // and no hidden re-cropping. Default zoom to 1.0 and pan to 0 for already-cropped photos.
-    if (matchesSelectedFrame && state.verticalModeLayout !== 'blur-bg') {
-      ctx.drawImage(img, 0, 0, width, height);
+    if (useBlurBg) {
+      // Step A: Draw blurred, cover-scaled background
+      const bgScale = Math.max(width / img.width, height / img.height) * 1.05;
+      const bgW = img.width * bgScale;
+      const bgH = img.height * bgScale;
+      const bgX = (width - bgW) / 2;
+      const bgY = (height - bgH) / 2;
+
+      ctx.save();
+      try { ctx.filter = 'blur(28px) brightness(0.65)'; } catch (e) {}
+      ctx.drawImage(img, bgX, bgY, bgW, bgH);
+      ctx.restore();
+
+      // Step B: Draw sharp foreground photo fitted in center safe zone with subtle Ken Burns motion
+      const fitScale = Math.min(width / img.width, (height * 0.78) / img.height);
+      const fgZoom = this.lerp(1.0, 1.08, progress);
+      const fgTotalScale = fitScale * fgZoom;
+      const fgWidth = Math.round(img.width * fgTotalScale);
+      const fgHeight = Math.round(img.height * fgTotalScale);
+      const fgX = Math.round((width - fgWidth) / 2 + (panX * 12));
+      const fgY = Math.round((height - fgHeight) / 2 + (panY * 12));
+
+      ctx.save();
+      try { ctx.filter = 'none'; } catch (e) {}
+      ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
+      ctx.shadowBlur = 30;
+      ctx.drawImage(img, fgX, fgY, fgWidth, fgHeight);
+      ctx.restore();
       return;
     }
 
-    // 2. Photo does NOT match the selected frame size (e.g. uploaded photo or uncropped clip):
-    // Fit it with the existing blur-background approach. Never auto-cut it.
-    const bgScale = Math.max(width / img.width, height / img.height);
-    const bgW = img.width * bgScale;
-    const bgH = img.height * bgScale;
-    const bgX = (width - bgW) / 2;
-    const bgY = (height - bgH) / 2;
+    // Standard Ken Burns: Cover scaling with strict edge-clamping (guarantees no empty edges)
+    const baseScale = Math.max(width / img.width, height / img.height);
+    const totalScale = baseScale * currentZoom;
+    const drawnW = img.width * totalScale;
+    const drawnH = img.height * totalScale;
 
-    // Step A: Draw blurred, scaled background copy (isolated in save/restore)
-    ctx.save();
-    ctx.filter = 'blur(28px) brightness(0.65)';
-    ctx.drawImage(img, bgX, bgY, bgW, bgH);
-    ctx.restore();
+    // Clamping guarantees no empty edges appear:
+    const excessX = Math.max(0, drawnW - width);
+    const excessY = Math.max(0, drawnH - height);
+    const offsetX = ((width - drawnW) / 2) + (panX * (excessX / 2));
+    const offsetY = ((height - drawnH) / 2) + (panY * (excessY / 2));
 
-    // Step B: Draw sharp foreground photo fitted in the center safe zone without cutting edges
-    // Never upscale a photo more than needed
-    const fitScale = (height > width)
-      ? Math.min(width / img.width, (height * 0.75) / img.height)
-      : Math.min(width / img.width, height / img.height);
-    const safeScale = (img.width < width && img.height < height && fitScale > 1.0)
-      ? 1.0
-      : fitScale;
-    const fgWidth = Math.round(img.width * safeScale);
-    const fgHeight = Math.round(img.height * safeScale);
-    const fgX = Math.round((width - fgWidth) / 2);
-    const fgY = Math.round((height - fgHeight) / 2);
-
-    ctx.save();
-    // Do not apply ctx.filter blur/brightness to the main photo path
-    ctx.filter = 'none';
-    ctx.shadowColor = 'rgba(0, 0, 0, 0.7)';
-    ctx.shadowBlur = 30;
-    ctx.drawImage(img, fgX, fgY, fgWidth, fgHeight);
-    ctx.restore();
+    ctx.drawImage(img, offsetX, offsetY, drawnW, drawnH);
   }
 
   /**
@@ -174,8 +198,9 @@ export class FrameRenderer {
    * @param {number} height Canvas height
    * @param {object} styling Caption styling parameters
    */
-  drawCaptions(ctx, caption, t, width, height, styling) {
+  drawCaptions(ctx, caption, t, width, height, styling = {}) {
     if (!caption || !caption.text) return;
+    const style = styling || {};
 
     // Calculate fade in / fade out alpha
     const FADE_DUR = 0.15;
@@ -193,8 +218,8 @@ export class FrameRenderer {
     ctx.globalAlpha *= alpha;
 
     // Setup font
-    const fontSize = styling.fontSize || 42;
-    const fontFamily = styling.fontFamily || "'Noto Sans Devanagari', sans-serif";
+    const fontSize = style.fontSize || 42;
+    const fontFamily = style.fontFamily || "'Noto Sans Devanagari', 'Plus Jakarta Sans', sans-serif";
     ctx.font = `700 ${fontSize}px ${fontFamily}`;
     ctx.textAlign = 'center';
     ctx.textBaseline = 'middle';
@@ -213,22 +238,22 @@ export class FrameRenderer {
 
     // Calculate vertical position with safe area margins
     let blockCenterY = Math.round(height * 0.82); // Default bottom safe zone
-    if (styling.position === 'top') {
+    if (style.position === 'top') {
       blockCenterY = Math.round(height * 0.15);
-    } else if (styling.position === 'center') {
+    } else if (style.position === 'center') {
       blockCenterY = Math.round(height * 0.50);
     }
 
     // 9:16 aspect ratio safe margin adjustment (keep away from bottom UI buttons)
-    if (width < height && styling.position === 'bottom') {
+    if (width < height && style.position === 'bottom') {
       blockCenterY = Math.round(height * 0.76);
     }
 
     const startY = Math.round(blockCenterY - (totalBlockHeight / 2) + (lineHeight / 2));
 
     // Optional Background Box
-    if (styling.boxEnabled) {
-      const boxOpacity = (styling.boxOpacity !== undefined ? styling.boxOpacity : 65) / 100;
+    if (style.boxEnabled) {
+      const boxOpacity = (style.boxOpacity !== undefined ? style.boxOpacity : 65) / 100;
       ctx.fillStyle = `rgba(10, 14, 23, ${boxOpacity})`;
 
       // Measure max line width for the box
@@ -247,7 +272,11 @@ export class FrameRenderer {
       const radius = 12;
 
       ctx.beginPath();
-      ctx.roundRect(boxX, boxY, boxWidth, boxHeight, radius);
+      if (typeof ctx.roundRect === 'function') {
+        ctx.roundRect(boxX, boxY, boxWidth, boxHeight, radius);
+      } else {
+        ctx.rect(boxX, boxY, boxWidth, boxHeight);
+      }
       ctx.fill();
     }
 
@@ -261,17 +290,17 @@ export class FrameRenderer {
       const lineY = Math.round(startY + (li * lineHeight));
 
       // Text Outline / Drop Shadow
-      if (styling.outlineThickness > 0) {
-        ctx.strokeStyle = styling.outlineColor || '#000000';
-        ctx.lineWidth = styling.outlineThickness * 2;
+      if (style.outlineThickness > 0) {
+        ctx.strokeStyle = style.outlineColor || '#000000';
+        ctx.lineWidth = style.outlineThickness * 2;
         ctx.lineJoin = 'round';
         ctx.strokeText(lineText, Math.round(width / 2), lineY);
       }
 
       // Fill Main Text
-      ctx.fillStyle = styling.textColor || '#ffffff';
+      ctx.fillStyle = style.textColor || '#ffffff';
 
-      if (styling.karaokeEnabled) {
+      if (style.karaokeEnabled) {
         // Karaoke word highlighting weighted by spoken units (aksharas / syllables)
         const words = lineText.split(' ');
         const wordWeights = words.map((w) => countSpokenUnits(w));
@@ -297,8 +326,8 @@ export class FrameRenderer {
           const isHighlighted = (wi <= currentActiveWordIdx);
 
           ctx.fillStyle = isHighlighted
-            ? (styling.highlightColor || '#fbbf24')
-            : (styling.textColor || '#ffffff');
+            ? (style.highlightColor || '#fbbf24')
+            : (style.textColor || '#ffffff');
 
           ctx.fillText(w, cursorX, lineY);
           cursorX += Math.round(ctx.measureText(w + ' ').width);
@@ -356,13 +385,19 @@ export class FrameRenderer {
    * @returns {Promise<void>}
    */
   async renderFrame(t, ctx, width, height, appState) {
+    if (!ctx || !width || !height) return;
+    const state = appState || {};
+
     // 1. Clear Canvas with deep black
     ctx.fillStyle = '#000000';
     ctx.fillRect(0, 0, width, height);
 
     // 2. Query Active Segments from Timeline
-    const timelineData = appState.timelineEngine.getActiveSegments(t);
-    const { currentSegment, nextSegment, transitionProgress } = timelineData;
+    if (!state.timelineEngine || typeof state.timelineEngine.getActiveSegments !== 'function') {
+      return;
+    }
+    const timelineData = state.timelineEngine.getActiveSegments(t);
+    const { currentSegment, nextSegment, transitionProgress } = timelineData || {};
 
     if (!currentSegment) return;
 
@@ -370,55 +405,64 @@ export class FrameRenderer {
     ctx.imageSmoothingEnabled = true;
     ctx.imageSmoothingQuality = 'high';
 
-    // Apply Color Grading Filter (contrast and saturation only - do NOT apply blur or brightness to main photo path)
-    const grading = appState.colorGrading || {};
+    // Apply Color Grading Filter safely
+    const grading = state.colorGrading || {};
     const contrast = 100 + (grading.contrast || 5);
     const saturation = (grading.saturation !== undefined ? grading.saturation : 105);
-    ctx.filter = `contrast(${contrast}%) saturate(${saturation}%)`;
+    try {
+      ctx.filter = `contrast(${contrast}%) saturate(${saturation}%)`;
+    } catch (e) {}
 
     // 3. Render Current Segment Photo
-    const currentImg = await this.extractor.getBitmap(currentSegment.photo);
-    if (currentImg) {
-      this.drawSegmentPhoto(ctx, currentImg, currentSegment, t, width, height, appState);
+    if (this.extractor && typeof this.extractor.getBitmap === 'function' && currentSegment.photo) {
+      const currentImg = await this.extractor.getBitmap(currentSegment.photo);
+      if (currentImg) {
+        this.drawSegmentPhoto(ctx, currentImg, currentSegment, t, width, height, state);
+      }
     }
 
     // 4. Render Crossfade / Transition if active
-    if (nextSegment && transitionProgress > 0) {
-      const nextImg = await this.extractor.getBitmap(nextSegment.photo);
-      if (nextImg) {
-        ctx.save();
-        if (appState.transitionType === 'dip-to-black') {
-          // Dip to black: fade current down then fade next up
-          const blackAlpha = (transitionProgress < 0.5)
-            ? transitionProgress * 2
-            : (1 - transitionProgress) * 2;
-          ctx.fillStyle = `rgba(0, 0, 0, ${blackAlpha})`;
-          ctx.fillRect(0, 0, width, height);
-          if (transitionProgress >= 0.5) {
-            ctx.globalAlpha = (transitionProgress - 0.5) * 2;
-            this.drawSegmentPhoto(ctx, nextImg, nextSegment, t, width, height, appState);
+    if (nextSegment && transitionProgress > 0 && state.transitionType !== 'none') {
+      if (this.extractor && typeof this.extractor.getBitmap === 'function' && nextSegment.photo) {
+        const nextImg = await this.extractor.getBitmap(nextSegment.photo);
+        if (nextImg) {
+          ctx.save();
+          if (state.transitionType === 'dip-to-black') {
+            const blackAlpha = (transitionProgress < 0.5)
+              ? transitionProgress * 2
+              : (1 - transitionProgress) * 2;
+            ctx.fillStyle = `rgba(0, 0, 0, ${blackAlpha})`;
+            ctx.fillRect(0, 0, width, height);
+            if (transitionProgress >= 0.5) {
+              ctx.globalAlpha = (transitionProgress - 0.5) * 2;
+              this.drawSegmentPhoto(ctx, nextImg, nextSegment, t, width, height, state);
+            }
+          } else {
+            // Smooth Crossfade
+            ctx.globalAlpha = transitionProgress;
+            this.drawSegmentPhoto(ctx, nextImg, nextSegment, t, width, height, state);
           }
-        } else {
-          // Smooth Crossfade
-          ctx.globalAlpha = transitionProgress;
-          this.drawSegmentPhoto(ctx, nextImg, nextSegment, t, width, height, appState);
+          ctx.restore();
         }
-        ctx.restore();
       }
     }
 
     // Reset Filter for overlays and text
-    ctx.filter = 'none';
+    try {
+      ctx.filter = 'none';
+    } catch (e) {}
 
     // 5. Cinematic Overlays: Vignette & Film Grain
-    const overlays = appState.overlays || {};
+    const overlays = state.overlays || {};
     this.drawVignette(ctx, width, height, (overlays.vignette !== undefined ? overlays.vignette : 35) / 100);
     this.drawFilmGrain(ctx, width, height, (overlays.filmGrain !== undefined ? overlays.filmGrain : 15) / 100);
 
     // 6. Burned-in Captions
-    const activeCaption = appState.captionEngine.getCaptionAtTime(t);
-    if (activeCaption) {
-      this.drawCaptions(ctx, activeCaption, t, width, height, appState.captionStyle);
+    if (state.captionEngine && typeof state.captionEngine.getCaptionAtTime === 'function') {
+      const activeCaption = state.captionEngine.getCaptionAtTime(t);
+      if (activeCaption) {
+        this.drawCaptions(ctx, activeCaption, t, width, height, state.captionStyle);
+      }
     }
   }
 }

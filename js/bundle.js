@@ -31,29 +31,62 @@
       this.bitmapCache.clear();
     }
     /**
-     * Retrieves an ImageBitmap for a frame, using the LRU cache
+     * Retrieves an ImageBitmap for a frame, using the LRU cache.
+     * Resiliently resolves bitmaps from frameItem.blob, IndexedDB, or dataUrl/previewUrl.
      * @param {object} frameItem 
      * @returns {Promise<ImageBitmap>}
      */
     async getBitmap(frameItem) {
-      if (!frameItem || !frameItem.blob) return null;
+      if (!frameItem) return null;
       if (this.bitmapCache.has(frameItem.id)) {
-        const bmp2 = this.bitmapCache.get(frameItem.id);
-        this.bitmapCache.delete(frameItem.id);
-        this.bitmapCache.set(frameItem.id, bmp2);
-        return bmp2;
-      }
-      const bmp = await createImageBitmap(frameItem.blob);
-      if (this.bitmapCache.size >= this.lruCapacity) {
-        const oldestKey = this.bitmapCache.keys().next().value;
-        const oldBmp = this.bitmapCache.get(oldestKey);
-        if (oldBmp && typeof oldBmp.close === "function") {
-          oldBmp.close();
+        const bmp = this.bitmapCache.get(frameItem.id);
+        if (bmp && bmp.width > 0 && bmp.height > 0) {
+          this.bitmapCache.delete(frameItem.id);
+          this.bitmapCache.set(frameItem.id, bmp);
+          return bmp;
         }
-        this.bitmapCache.delete(oldestKey);
       }
-      this.bitmapCache.set(frameItem.id, bmp);
-      return bmp;
+      let blob = frameItem.blob;
+      if (!blob && typeof window !== "undefined" && window.ProjectStore) {
+        try {
+          const getter = window.ProjectStore.getBlob || window.ProjectStore.loadBlob;
+          if (getter) {
+            blob = await getter.call(window.ProjectStore, frameItem.id);
+            if (blob) {
+              frameItem.blob = blob;
+              if (!frameItem.previewUrl || frameItem.previewUrl.startsWith("blob:")) {
+                frameItem.previewUrl = URL.createObjectURL(blob);
+              }
+            }
+          }
+        } catch (e) {
+        }
+      }
+      if (!blob && frameItem.dataUrl && typeof frameItem.dataUrl === "string" && frameItem.dataUrl.startsWith("data:")) {
+        try {
+          const res = await fetch(frameItem.dataUrl);
+          blob = await res.blob();
+          if (blob) frameItem.blob = blob;
+        } catch (e) {
+        }
+      }
+      if (!blob) return null;
+      try {
+        const bmp = await createImageBitmap(blob);
+        if (this.bitmapCache.size >= this.lruCapacity) {
+          const oldestKey = this.bitmapCache.keys().next().value;
+          const oldBmp = this.bitmapCache.get(oldestKey);
+          if (oldBmp && typeof oldBmp.close === "function") {
+            oldBmp.close();
+          }
+          this.bitmapCache.delete(oldestKey);
+        }
+        this.bitmapCache.set(frameItem.id, bmp);
+        return bmp;
+      } catch (err) {
+        console.warn("[getBitmap Error]", err);
+        return null;
+      }
     }
     /**
      * Creates an object URL for previewing, and tracks it for revocation
@@ -2333,36 +2366,67 @@ ${body}`;
       if (!img || !img.width || !img.height) return;
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
+      const startTime = (segment == null ? void 0 : segment.startTime) || 0;
+      const endTime = (segment == null ? void 0 : segment.endTime) || startTime + ((segment == null ? void 0 : segment.duration) || 5);
+      const segDuration = Math.max(0.1, endTime - startTime);
+      const rawProgress = Math.max(0, Math.min(1, (t - startTime) / segDuration));
+      const progress = this.easeInOutSine(rawProgress);
+      const maxZoomLimit = (state == null ? void 0 : state.maxZoom) || 1.25;
+      const zoomStart = (segment == null ? void 0 : segment.zoomStart) !== void 0 ? segment.zoomStart : 1;
+      const zoomEnd = (segment == null ? void 0 : segment.zoomEnd) !== void 0 ? segment.zoomEnd : maxZoomLimit;
+      const currentZoom = this.lerp(zoomStart, zoomEnd, progress);
+      const panXStart = (segment == null ? void 0 : segment.panXStart) !== void 0 ? segment.panXStart : 0;
+      const panXEnd = (segment == null ? void 0 : segment.panXEnd) !== void 0 ? segment.panXEnd : 0;
+      const panX = this.lerp(panXStart, panXEnd, progress);
+      const panYStart = (segment == null ? void 0 : segment.panYStart) !== void 0 ? segment.panYStart : 0;
+      const panYEnd = (segment == null ? void 0 : segment.panYEnd) !== void 0 ? segment.panYEnd : 0;
+      const panY = this.lerp(panYStart, panYEnd, progress);
       const imgAspect = img.width / img.height;
       const canvasAspect = width / height;
-      const isRatioMatch = Math.abs(imgAspect - canvasAspect) / canvasAspect < 0.02;
-      const isCropped = (segment == null ? void 0 : segment.photo) ? segment.photo.isCropped !== false : true;
-      const matchesSelectedFrame = isCropped && isRatioMatch;
-      if (matchesSelectedFrame && state.verticalModeLayout !== "blur-bg") {
-        ctx.drawImage(img, 0, 0, width, height);
+      const isRatioMatch = Math.abs(imgAspect - canvasAspect) / canvasAspect < 0.05;
+      const isVerticalCanvas = height > width;
+      const isHorizontalPhoto = img.width > img.height;
+      const useBlurBg = (state == null ? void 0 : state.verticalModeLayout) === "blur-bg" || isVerticalCanvas && isHorizontalPhoto && !isRatioMatch;
+      if (useBlurBg) {
+        const bgScale = Math.max(width / img.width, height / img.height) * 1.05;
+        const bgW = img.width * bgScale;
+        const bgH = img.height * bgScale;
+        const bgX = (width - bgW) / 2;
+        const bgY = (height - bgH) / 2;
+        ctx.save();
+        try {
+          ctx.filter = "blur(28px) brightness(0.65)";
+        } catch (e) {
+        }
+        ctx.drawImage(img, bgX, bgY, bgW, bgH);
+        ctx.restore();
+        const fitScale = Math.min(width / img.width, height * 0.78 / img.height);
+        const fgZoom = this.lerp(1, 1.08, progress);
+        const fgTotalScale = fitScale * fgZoom;
+        const fgWidth = Math.round(img.width * fgTotalScale);
+        const fgHeight = Math.round(img.height * fgTotalScale);
+        const fgX = Math.round((width - fgWidth) / 2 + panX * 12);
+        const fgY = Math.round((height - fgHeight) / 2 + panY * 12);
+        ctx.save();
+        try {
+          ctx.filter = "none";
+        } catch (e) {
+        }
+        ctx.shadowColor = "rgba(0, 0, 0, 0.7)";
+        ctx.shadowBlur = 30;
+        ctx.drawImage(img, fgX, fgY, fgWidth, fgHeight);
+        ctx.restore();
         return;
       }
-      const bgScale = Math.max(width / img.width, height / img.height);
-      const bgW = img.width * bgScale;
-      const bgH = img.height * bgScale;
-      const bgX = (width - bgW) / 2;
-      const bgY = (height - bgH) / 2;
-      ctx.save();
-      ctx.filter = "blur(28px) brightness(0.65)";
-      ctx.drawImage(img, bgX, bgY, bgW, bgH);
-      ctx.restore();
-      const fitScale = height > width ? Math.min(width / img.width, height * 0.75 / img.height) : Math.min(width / img.width, height / img.height);
-      const safeScale = img.width < width && img.height < height && fitScale > 1 ? 1 : fitScale;
-      const fgWidth = Math.round(img.width * safeScale);
-      const fgHeight = Math.round(img.height * safeScale);
-      const fgX = Math.round((width - fgWidth) / 2);
-      const fgY = Math.round((height - fgHeight) / 2);
-      ctx.save();
-      ctx.filter = "none";
-      ctx.shadowColor = "rgba(0, 0, 0, 0.7)";
-      ctx.shadowBlur = 30;
-      ctx.drawImage(img, fgX, fgY, fgWidth, fgHeight);
-      ctx.restore();
+      const baseScale = Math.max(width / img.width, height / img.height);
+      const totalScale = baseScale * currentZoom;
+      const drawnW = img.width * totalScale;
+      const drawnH = img.height * totalScale;
+      const excessX = Math.max(0, drawnW - width);
+      const excessY = Math.max(0, drawnH - height);
+      const offsetX = (width - drawnW) / 2 + panX * (excessX / 2);
+      const offsetY = (height - drawnH) / 2 + panY * (excessY / 2);
+      ctx.drawImage(img, offsetX, offsetY, drawnW, drawnH);
     }
     /**
      * Draws burned-in captions onto the canvas with Devanagari font support,
@@ -2374,8 +2438,9 @@ ${body}`;
      * @param {number} height Canvas height
      * @param {object} styling Caption styling parameters
      */
-    drawCaptions(ctx, caption, t, width, height, styling) {
+    drawCaptions(ctx, caption, t, width, height, styling = {}) {
       if (!caption || !caption.text) return;
+      const style = styling || {};
       const FADE_DUR = 0.15;
       let alpha = 1;
       const timeSinceStart = t - caption.start;
@@ -2387,8 +2452,8 @@ ${body}`;
       }
       ctx.save();
       ctx.globalAlpha *= alpha;
-      const fontSize = styling.fontSize || 42;
-      const fontFamily = styling.fontFamily || "'Noto Sans Devanagari', sans-serif";
+      const fontSize = style.fontSize || 42;
+      const fontFamily = style.fontFamily || "'Noto Sans Devanagari', 'Plus Jakarta Sans', sans-serif";
       ctx.font = `700 ${fontSize}px ${fontFamily}`;
       ctx.textAlign = "center";
       ctx.textBaseline = "middle";
@@ -2401,17 +2466,17 @@ ${body}`;
       const lineHeight = Math.round(fontSize * 1.35);
       const totalBlockHeight = lines.length * lineHeight;
       let blockCenterY = Math.round(height * 0.82);
-      if (styling.position === "top") {
+      if (style.position === "top") {
         blockCenterY = Math.round(height * 0.15);
-      } else if (styling.position === "center") {
+      } else if (style.position === "center") {
         blockCenterY = Math.round(height * 0.5);
       }
-      if (width < height && styling.position === "bottom") {
+      if (width < height && style.position === "bottom") {
         blockCenterY = Math.round(height * 0.76);
       }
       const startY = Math.round(blockCenterY - totalBlockHeight / 2 + lineHeight / 2);
-      if (styling.boxEnabled) {
-        const boxOpacity = (styling.boxOpacity !== void 0 ? styling.boxOpacity : 65) / 100;
+      if (style.boxEnabled) {
+        const boxOpacity = (style.boxOpacity !== void 0 ? style.boxOpacity : 65) / 100;
         ctx.fillStyle = `rgba(10, 14, 23, ${boxOpacity})`;
         let maxLineWidth = 0;
         for (const line of lines) {
@@ -2426,7 +2491,11 @@ ${body}`;
         const boxY = Math.round(blockCenterY - totalBlockHeight / 2 - boxPaddingY);
         const radius = 12;
         ctx.beginPath();
-        ctx.roundRect(boxX, boxY, boxWidth, boxHeight, radius);
+        if (typeof ctx.roundRect === "function") {
+          ctx.roundRect(boxX, boxY, boxWidth, boxHeight, radius);
+        } else {
+          ctx.rect(boxX, boxY, boxWidth, boxHeight);
+        }
         ctx.fill();
       }
       const chunkDuration = Math.max(0.1, caption.end - caption.start);
@@ -2434,14 +2503,14 @@ ${body}`;
       for (let li = 0; li < lines.length; li++) {
         const lineText = lines[li];
         const lineY = Math.round(startY + li * lineHeight);
-        if (styling.outlineThickness > 0) {
-          ctx.strokeStyle = styling.outlineColor || "#000000";
-          ctx.lineWidth = styling.outlineThickness * 2;
+        if (style.outlineThickness > 0) {
+          ctx.strokeStyle = style.outlineColor || "#000000";
+          ctx.lineWidth = style.outlineThickness * 2;
           ctx.lineJoin = "round";
           ctx.strokeText(lineText, Math.round(width / 2), lineY);
         }
-        ctx.fillStyle = styling.textColor || "#ffffff";
-        if (styling.karaokeEnabled) {
+        ctx.fillStyle = style.textColor || "#ffffff";
+        if (style.karaokeEnabled) {
           const words = lineText.split(" ");
           const wordWeights = words.map((w) => countSpokenUnits(w));
           const totalLineWeight = wordWeights.reduce((a, b) => a + b, 0);
@@ -2460,7 +2529,7 @@ ${body}`;
           for (let wi = 0; wi < words.length; wi++) {
             const w = words[wi];
             const isHighlighted = wi <= currentActiveWordIdx;
-            ctx.fillStyle = isHighlighted ? styling.highlightColor || "#fbbf24" : styling.textColor || "#ffffff";
+            ctx.fillStyle = isHighlighted ? style.highlightColor || "#fbbf24" : style.textColor || "#ffffff";
             ctx.fillText(w, cursorX, lineY);
             cursorX += Math.round(ctx.measureText(w + " ").width);
           }
@@ -2517,47 +2586,64 @@ ${body}`;
      * @returns {Promise<void>}
      */
     async renderFrame(t, ctx, width, height, appState) {
+      if (!ctx || !width || !height) return;
+      const state = appState || {};
       ctx.fillStyle = "#000000";
       ctx.fillRect(0, 0, width, height);
-      const timelineData = appState.timelineEngine.getActiveSegments(t);
-      const { currentSegment, nextSegment, transitionProgress } = timelineData;
+      if (!state.timelineEngine || typeof state.timelineEngine.getActiveSegments !== "function") {
+        return;
+      }
+      const timelineData = state.timelineEngine.getActiveSegments(t);
+      const { currentSegment, nextSegment, transitionProgress } = timelineData || {};
       if (!currentSegment) return;
       ctx.imageSmoothingEnabled = true;
       ctx.imageSmoothingQuality = "high";
-      const grading = appState.colorGrading || {};
+      const grading = state.colorGrading || {};
       const contrast = 100 + (grading.contrast || 5);
       const saturation = grading.saturation !== void 0 ? grading.saturation : 105;
-      ctx.filter = `contrast(${contrast}%) saturate(${saturation}%)`;
-      const currentImg = await this.extractor.getBitmap(currentSegment.photo);
-      if (currentImg) {
-        this.drawSegmentPhoto(ctx, currentImg, currentSegment, t, width, height, appState);
+      try {
+        ctx.filter = `contrast(${contrast}%) saturate(${saturation}%)`;
+      } catch (e) {
       }
-      if (nextSegment && transitionProgress > 0) {
-        const nextImg = await this.extractor.getBitmap(nextSegment.photo);
-        if (nextImg) {
-          ctx.save();
-          if (appState.transitionType === "dip-to-black") {
-            const blackAlpha = transitionProgress < 0.5 ? transitionProgress * 2 : (1 - transitionProgress) * 2;
-            ctx.fillStyle = `rgba(0, 0, 0, ${blackAlpha})`;
-            ctx.fillRect(0, 0, width, height);
-            if (transitionProgress >= 0.5) {
-              ctx.globalAlpha = (transitionProgress - 0.5) * 2;
-              this.drawSegmentPhoto(ctx, nextImg, nextSegment, t, width, height, appState);
-            }
-          } else {
-            ctx.globalAlpha = transitionProgress;
-            this.drawSegmentPhoto(ctx, nextImg, nextSegment, t, width, height, appState);
-          }
-          ctx.restore();
+      if (this.extractor && typeof this.extractor.getBitmap === "function" && currentSegment.photo) {
+        const currentImg = await this.extractor.getBitmap(currentSegment.photo);
+        if (currentImg) {
+          this.drawSegmentPhoto(ctx, currentImg, currentSegment, t, width, height, state);
         }
       }
-      ctx.filter = "none";
-      const overlays = appState.overlays || {};
+      if (nextSegment && transitionProgress > 0 && state.transitionType !== "none") {
+        if (this.extractor && typeof this.extractor.getBitmap === "function" && nextSegment.photo) {
+          const nextImg = await this.extractor.getBitmap(nextSegment.photo);
+          if (nextImg) {
+            ctx.save();
+            if (state.transitionType === "dip-to-black") {
+              const blackAlpha = transitionProgress < 0.5 ? transitionProgress * 2 : (1 - transitionProgress) * 2;
+              ctx.fillStyle = `rgba(0, 0, 0, ${blackAlpha})`;
+              ctx.fillRect(0, 0, width, height);
+              if (transitionProgress >= 0.5) {
+                ctx.globalAlpha = (transitionProgress - 0.5) * 2;
+                this.drawSegmentPhoto(ctx, nextImg, nextSegment, t, width, height, state);
+              }
+            } else {
+              ctx.globalAlpha = transitionProgress;
+              this.drawSegmentPhoto(ctx, nextImg, nextSegment, t, width, height, state);
+            }
+            ctx.restore();
+          }
+        }
+      }
+      try {
+        ctx.filter = "none";
+      } catch (e) {
+      }
+      const overlays = state.overlays || {};
       this.drawVignette(ctx, width, height, (overlays.vignette !== void 0 ? overlays.vignette : 35) / 100);
       this.drawFilmGrain(ctx, width, height, (overlays.filmGrain !== void 0 ? overlays.filmGrain : 15) / 100);
-      const activeCaption = appState.captionEngine.getCaptionAtTime(t);
-      if (activeCaption) {
-        this.drawCaptions(ctx, activeCaption, t, width, height, appState.captionStyle);
+      if (state.captionEngine && typeof state.captionEngine.getCaptionAtTime === "function") {
+        const activeCaption = state.captionEngine.getCaptionAtTime(t);
+        if (activeCaption) {
+          this.drawCaptions(ctx, activeCaption, t, width, height, state.captionStyle);
+        }
       }
     }
   };
@@ -4714,6 +4800,10 @@ If you want to offset all timestamps of a track such that the first one is zero,
           } catch (e) {
           }
         }
+        if (!chosenAudioCodec) {
+          chosenAudioCodec = "mp4a.40.2";
+          muxerAudioCodec = "aac";
+        }
       }
       return {
         videoCodec: chosenVideoCodec,
@@ -5267,9 +5357,19 @@ If you want to offset all timestamps of a track such that the first one is zero,
           audioEncoder.close();
           if (audioEncoderError) throw audioEncoderError;
         }
+        const frameDurationMicros = Math.round(1e6 / fps);
         let videoEncoderError = null;
+        let firstMeta = null;
         const videoEncoder = new VideoEncoder({
-          output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+          output: (chunk, meta) => {
+            if (meta && meta.decoderConfig) {
+              firstMeta = meta;
+            }
+            const dur = Number.isFinite(chunk.duration) && chunk.duration > 0 ? chunk.duration : frameDurationMicros;
+            const data = new Uint8Array(chunk.byteLength);
+            chunk.copyTo(data);
+            muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, dur, meta || firstMeta);
+          },
           error: (e) => {
             console.error("[WebCodecs VideoEncoder Error]", e);
             videoEncoderError = e;
@@ -5309,7 +5409,10 @@ If you want to offset all timestamps of a track such that the first one is zero,
             thumbCtx.drawImage(renderCanvas, 0, 0, miniThumbCanvas.width, miniThumbCanvas.height);
           }
           const timestampMicros = Math.round(t * 1e6);
-          const videoFrame = new VideoFrame(renderCanvas, { timestamp: timestampMicros });
+          const videoFrame = new VideoFrame(renderCanvas, {
+            timestamp: timestampMicros,
+            duration: frameDurationMicros
+          });
           const keyFrame = frameIdx % (fps * 2) === 0;
           videoEncoder.encode(videoFrame, { keyFrame });
           videoFrame.close();
@@ -5360,10 +5463,7 @@ If you want to offset all timestamps of a track such that the first one is zero,
         if (this.cancelRequested || ((_a = err.message) == null ? void 0 : _a.includes("cancelled"))) {
           throw err;
         }
-        if (hasVoice2) {
-          throw err;
-        }
-        console.warn("[WebCodecs] Silent render failed, falling back to MediaRecorder:", err);
+        console.warn("[WebCodecs] Render encountered an issue, falling back to MediaRecorder real-time engine:", err);
         return await this.exportWithVoice(appState, onProgress, miniThumbCanvas);
       }
     }
@@ -7776,6 +7876,14 @@ ${script}
       });
     }
     /**
+     * Alias for getBlob
+     * @param {string} key
+     * @returns {Promise<Blob|null>}
+     */
+    static async loadBlob(key) {
+      return this.getBlob(key);
+    }
+    /**
      * Deletes a Blob
      * @param {string} key 
      */
@@ -7835,6 +7943,9 @@ ${script}
       }
     }
   };
+  if (typeof window !== "undefined") {
+    window.ProjectStore = ProjectStore;
+  }
 
   // js/thumbnail.js
   var ThumbnailMaker = class {
@@ -8974,6 +9085,7 @@ ${script}
             const photoId = `photo_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
             const photoRecord = {
               id: photoId,
+              blob: finalBlob,
               previewUrl: dataUrl,
               dataUrl,
               timestamp: count * 4,
@@ -9023,10 +9135,12 @@ ${script}
       if (idx !== -1) {
         const [removed] = frames.splice(idx, 1);
         if (removed && removed.previewUrl && typeof removed.previewUrl === "string" && removed.previewUrl.startsWith("blob:")) {
-          try {
-            URL.revokeObjectURL(removed.previewUrl);
-          } catch (e) {
-          }
+          setTimeout(() => {
+            try {
+              URL.revokeObjectURL(removed.previewUrl);
+            } catch (e) {
+            }
+          }, 2e3);
         }
         this.renderPhotoGallery();
         this.markDirty();
@@ -9606,23 +9720,17 @@ ${comment}
       }
     }
     async renderVideoBlob() {
-      return new Promise(async (resolve, reject) => {
-        try {
-          const bar = document.getElementById("exportProgressBar");
-          const pct = document.getElementById("exportPercentDisplay");
-          const frameDisplay = document.getElementById("exportFrameDisplay");
-          const miniCanvas = document.getElementById("exportMiniThumbCanvas");
-          const onProgress = (p) => {
-            if (bar) bar.style.width = `${p.percent}%`;
-            if (pct) pct.textContent = `${p.percent}%`;
-            if (frameDisplay) frameDisplay.textContent = `${p.currentFrame} / ${p.totalFrames}`;
-          };
-          const result = await this.app.exporter.exportFastSilent(this.app.state, onProgress, miniCanvas, false);
-          resolve((result == null ? void 0 : result.blob) || result);
-        } catch (err) {
-          reject(err);
-        }
-      });
+      const bar = document.getElementById("exportProgressBar");
+      const pct = document.getElementById("exportPercentDisplay");
+      const frameDisplay = document.getElementById("exportFrameDisplay");
+      const miniCanvas = document.getElementById("exportMiniThumbCanvas");
+      const onProgress = (p) => {
+        if (bar) bar.style.width = `${p.percent}%`;
+        if (pct) pct.textContent = `${p.percent}%`;
+        if (frameDisplay) frameDisplay.textContent = `${p.currentFrame} / ${p.totalFrames}`;
+      };
+      const result = await this.app.exporter.exportFastSilent(this.app.state, onProgress, miniCanvas, false);
+      return (result == null ? void 0 : result.blob) || result;
     }
     async downloadAllInZip() {
       var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j, _k;
@@ -9910,6 +10018,14 @@ ${fb.first_comment || ""}
       try {
         if (this.autosaveText) this.autosaveText.textContent = "Saving...";
         const scriptText = this.app.state.scriptText || ((_a = document.getElementById("scriptTextarea")) == null ? void 0 : _a.value) || "";
+        for (const f of this.app.state.extractedFrames || []) {
+          if (f.blob && typeof ProjectStore !== "undefined" && ProjectStore.saveBlob) {
+            try {
+              await ProjectStore.saveBlob(f.id, f.blob);
+            } catch (err) {
+            }
+          }
+        }
         const projectData = {
           id: this.currentProjectId,
           name: this.getProjectName(),
@@ -9921,8 +10037,9 @@ ${fb.first_comment || ""}
           hook_options: this.app.state.hookOptions || [],
           photo_records: (this.app.state.extractedFrames || []).map((f) => ({
             id: f.id,
-            dataUrl: f.dataUrl || f.previewUrl,
-            previewUrl: f.previewUrl || f.dataUrl,
+            dataUrl: typeof f.dataUrl === "string" && f.dataUrl.startsWith("data:") ? f.dataUrl : "",
+            previewUrl: "",
+            // Dead blob: URLs should never be persisted
             starred: Boolean(f.starred),
             timestamp: f.timestamp || 0,
             tags: f.tags || [],
@@ -10025,9 +10142,31 @@ ${fb.first_comment || ""}
       if (proj.photo_records) {
         this.app.state.extractedFrames = proj.photo_records.map((p) => ({
           ...p,
-          previewUrl: p.dataUrl || p.previewUrl
+          previewUrl: typeof p.dataUrl === "string" && p.dataUrl.startsWith("data:") ? p.dataUrl : ""
         }));
         this.app.refreshGallery();
+        if (typeof ProjectStore !== "undefined" && (ProjectStore.getBlob || ProjectStore.loadBlob)) {
+          const getter = ProjectStore.getBlob || ProjectStore.loadBlob;
+          Promise.all(proj.photo_records.map(async (p, idx) => {
+            try {
+              const blob = await getter.call(ProjectStore, p.id);
+              if (blob) {
+                const frameItem = this.app.state.extractedFrames[idx];
+                if (frameItem) {
+                  frameItem.blob = blob;
+                  if (!frameItem.previewUrl) {
+                    frameItem.previewUrl = URL.createObjectURL(blob);
+                  }
+                }
+              }
+            } catch (e) {
+            }
+          })).then(() => {
+            var _a2, _b2;
+            this.app.refreshGallery();
+            (_b2 = (_a2 = this.app).rebuildTimeline) == null ? void 0 : _b2.call(_a2);
+          });
+        }
       }
       if (proj.line_to_photo_assignment) {
         this.app.state.sceneMatches = proj.line_to_photo_assignment;
@@ -11403,10 +11542,12 @@ ${fb.first_comment || ""}
             if (frameIdx !== -1) {
               const [removed] = this.state.extractedFrames.splice(frameIdx, 1);
               if (removed && removed.previewUrl && typeof removed.previewUrl === "string" && removed.previewUrl.startsWith("blob:")) {
-                try {
-                  URL.revokeObjectURL(removed.previewUrl);
-                } catch (e) {
-                }
+                setTimeout(() => {
+                  try {
+                    URL.revokeObjectURL(removed.previewUrl);
+                  } catch (e) {
+                  }
+                }, 2e3);
               }
               this.refreshGallery();
             }

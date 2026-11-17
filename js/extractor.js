@@ -43,36 +43,74 @@ export class FrameExtractor {
   }
 
   /**
-   * Retrieves an ImageBitmap for a frame, using the LRU cache
+   * Retrieves an ImageBitmap for a frame, using the LRU cache.
+   * Resiliently resolves bitmaps from frameItem.blob, IndexedDB, or dataUrl/previewUrl.
    * @param {object} frameItem 
    * @returns {Promise<ImageBitmap>}
    */
   async getBitmap(frameItem) {
-    if (!frameItem || !frameItem.blob) return null;
+    if (!frameItem) return null;
 
     if (this.bitmapCache.has(frameItem.id)) {
       const bmp = this.bitmapCache.get(frameItem.id);
-      // Refresh order for LRU
-      this.bitmapCache.delete(frameItem.id);
+      if (bmp && bmp.width > 0 && bmp.height > 0) {
+        // Refresh order for LRU
+        this.bitmapCache.delete(frameItem.id);
+        this.bitmapCache.set(frameItem.id, bmp);
+        return bmp;
+      }
+    }
+
+    // Resolve Blob from multiple possible sources:
+    let blob = frameItem.blob;
+
+    // Source 2: IndexedDB ProjectStore if available
+    if (!blob && typeof window !== 'undefined' && window.ProjectStore) {
+      try {
+        const getter = window.ProjectStore.getBlob || window.ProjectStore.loadBlob;
+        if (getter) {
+          blob = await getter.call(window.ProjectStore, frameItem.id);
+          if (blob) {
+            frameItem.blob = blob;
+            if (!frameItem.previewUrl || frameItem.previewUrl.startsWith('blob:')) {
+              frameItem.previewUrl = URL.createObjectURL(blob);
+            }
+          }
+        }
+      } catch (e) {}
+    }
+
+    // Source 3: Convert dataUrl to Blob (only real data: URLs, never fetch stale blob: URLs)
+    if (!blob && frameItem.dataUrl && typeof frameItem.dataUrl === 'string' && frameItem.dataUrl.startsWith('data:')) {
+      try {
+        const res = await fetch(frameItem.dataUrl);
+        blob = await res.blob();
+        if (blob) frameItem.blob = blob;
+      } catch (e) {}
+    }
+
+    if (!blob) return null;
+
+    try {
+      // Create new bitmap lazily from Blob
+      const bmp = await createImageBitmap(blob);
+
+      // Evict oldest if exceeding capacity
+      if (this.bitmapCache.size >= this.lruCapacity) {
+        const oldestKey = this.bitmapCache.keys().next().value;
+        const oldBmp = this.bitmapCache.get(oldestKey);
+        if (oldBmp && typeof oldBmp.close === 'function') {
+          oldBmp.close();
+        }
+        this.bitmapCache.delete(oldestKey);
+      }
+
       this.bitmapCache.set(frameItem.id, bmp);
       return bmp;
+    } catch (err) {
+      console.warn('[getBitmap Error]', err);
+      return null;
     }
-
-    // Create new bitmap lazily from Blob
-    const bmp = await createImageBitmap(frameItem.blob);
-
-    // Evict oldest if exceeding capacity
-    if (this.bitmapCache.size >= this.lruCapacity) {
-      const oldestKey = this.bitmapCache.keys().next().value;
-      const oldBmp = this.bitmapCache.get(oldestKey);
-      if (oldBmp && typeof oldBmp.close === 'function') {
-        oldBmp.close();
-      }
-      this.bitmapCache.delete(oldestKey);
-    }
-
-    this.bitmapCache.set(frameItem.id, bmp);
-    return bmp;
   }
 
   /**

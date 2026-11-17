@@ -791,6 +791,7 @@ export class StoryFlowController {
           const photoId = `photo_${Date.now()}_${Math.random().toString(36).substr(2, 6)}`;
           const photoRecord = {
             id: photoId,
+            blob: finalBlob,
             previewUrl: dataUrl,
             dataUrl,
             timestamp: count * 4,
@@ -845,7 +846,9 @@ export class StoryFlowController {
     if (idx !== -1) {
       const [removed] = frames.splice(idx, 1);
       if (removed && removed.previewUrl && typeof removed.previewUrl === 'string' && removed.previewUrl.startsWith('blob:')) {
-        try { URL.revokeObjectURL(removed.previewUrl); } catch (e) {}
+        setTimeout(() => {
+          try { URL.revokeObjectURL(removed.previewUrl); } catch (e) {}
+        }, 2000);
       }
       this.renderPhotoGallery();
       this.markDirty();
@@ -1518,24 +1521,18 @@ ${comment}
   }
 
   async renderVideoBlob() {
-    return new Promise(async (resolve, reject) => {
-      try {
-        const bar = document.getElementById('exportProgressBar');
-        const pct = document.getElementById('exportPercentDisplay');
-        const frameDisplay = document.getElementById('exportFrameDisplay');
-        const miniCanvas = document.getElementById('exportMiniThumbCanvas');
+    const bar = document.getElementById('exportProgressBar');
+    const pct = document.getElementById('exportPercentDisplay');
+    const frameDisplay = document.getElementById('exportFrameDisplay');
+    const miniCanvas = document.getElementById('exportMiniThumbCanvas');
 
-        const onProgress = (p) => {
-          if (bar) bar.style.width = `${p.percent}%`;
-          if (pct) pct.textContent = `${p.percent}%`;
-          if (frameDisplay) frameDisplay.textContent = `${p.currentFrame} / ${p.totalFrames}`;
-        };
-        const result = await this.app.exporter.exportFastSilent(this.app.state, onProgress, miniCanvas, false);
-        resolve(result?.blob || result);
-      } catch (err) {
-        reject(err);
-      }
-    });
+    const onProgress = (p) => {
+      if (bar) bar.style.width = `${p.percent}%`;
+      if (pct) pct.textContent = `${p.percent}%`;
+      if (frameDisplay) frameDisplay.textContent = `${p.currentFrame} / ${p.totalFrames}`;
+    };
+    const result = await this.app.exporter.exportFastSilent(this.app.state, onProgress, miniCanvas, false);
+    return result?.blob || result;
   }
 
   async downloadAllInZip() {
@@ -1858,6 +1855,16 @@ ${fb.first_comment || ''}
     try {
       if (this.autosaveText) this.autosaveText.textContent = 'Saving...';
       const scriptText = this.app.state.scriptText || document.getElementById('scriptTextarea')?.value || '';
+
+      // Persist frame blobs into IndexedDB so they survive page reload
+      for (const f of this.app.state.extractedFrames || []) {
+        if (f.blob && typeof ProjectStore !== 'undefined' && ProjectStore.saveBlob) {
+          try {
+            await ProjectStore.saveBlob(f.id, f.blob);
+          } catch (err) {}
+        }
+      }
+
       const projectData = {
         id: this.currentProjectId,
         name: this.getProjectName(),
@@ -1869,8 +1876,8 @@ ${fb.first_comment || ''}
         hook_options: this.app.state.hookOptions || [],
         photo_records: (this.app.state.extractedFrames || []).map((f) => ({
           id: f.id,
-          dataUrl: f.dataUrl || f.previewUrl,
-          previewUrl: f.previewUrl || f.dataUrl,
+          dataUrl: (typeof f.dataUrl === 'string' && f.dataUrl.startsWith('data:')) ? f.dataUrl : '',
+          previewUrl: '', // Dead blob: URLs should never be persisted
           starred: Boolean(f.starred),
           timestamp: f.timestamp || 0,
           tags: f.tags || [],
@@ -1981,9 +1988,31 @@ ${fb.first_comment || ''}
     if (proj.photo_records) {
       this.app.state.extractedFrames = proj.photo_records.map(p => ({
         ...p,
-        previewUrl: p.dataUrl || p.previewUrl
+        previewUrl: (typeof p.dataUrl === 'string' && p.dataUrl.startsWith('data:')) ? p.dataUrl : ''
       }));
       this.app.refreshGallery();
+
+      // Asynchronously restore blobs from IndexedDB and set fresh blob URLs
+      if (typeof ProjectStore !== 'undefined' && (ProjectStore.getBlob || ProjectStore.loadBlob)) {
+        const getter = ProjectStore.getBlob || ProjectStore.loadBlob;
+        Promise.all(proj.photo_records.map(async (p, idx) => {
+          try {
+            const blob = await getter.call(ProjectStore, p.id);
+            if (blob) {
+              const frameItem = this.app.state.extractedFrames[idx];
+              if (frameItem) {
+                frameItem.blob = blob;
+                if (!frameItem.previewUrl) {
+                  frameItem.previewUrl = URL.createObjectURL(blob);
+                }
+              }
+            }
+          } catch (e) {}
+        })).then(() => {
+          this.app.refreshGallery();
+          this.app.rebuildTimeline?.();
+        });
+      }
     }
 
     if (proj.line_to_photo_assignment) {

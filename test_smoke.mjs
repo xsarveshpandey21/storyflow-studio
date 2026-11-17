@@ -313,7 +313,7 @@ async function runSmokeTest() {
     }
 
     // Reset to normal for remaining tests
-    await page.click('.preset-pill[data-preset="normal"]');
+    await page.click('.preset-pill[data-preset="normal"]', { force: true });
 
     // Test Autosave & Reload Restore
     console.log('[Autosave] Testing autosave and restore after reload...');

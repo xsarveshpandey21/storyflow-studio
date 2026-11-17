@@ -265,6 +265,10 @@ export class VideoExporter {
           }
         } catch (e) {}
       }
+      if (!chosenAudioCodec) {
+        chosenAudioCodec = 'mp4a.40.2';
+        muxerAudioCodec = 'aac';
+      }
     }
 
     return {
@@ -913,9 +917,21 @@ export class VideoExporter {
       }
 
       // 3. Encode video frames with back-pressure and error capture
+      const frameDurationMicros = Math.round(1000000 / fps);
       let videoEncoderError = null;
+      let firstMeta = null;
       const videoEncoder = new VideoEncoder({
-        output: (chunk, meta) => muxer.addVideoChunk(chunk, meta),
+        output: (chunk, meta) => {
+          if (meta && meta.decoderConfig) {
+            firstMeta = meta;
+          }
+          const dur = (Number.isFinite(chunk.duration) && chunk.duration > 0)
+            ? chunk.duration
+            : frameDurationMicros;
+          const data = new Uint8Array(chunk.byteLength);
+          chunk.copyTo(data);
+          muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, dur, meta || firstMeta);
+        },
         error: (e) => {
           console.error('[WebCodecs VideoEncoder Error]', e);
           videoEncoderError = e;
@@ -963,7 +979,10 @@ export class VideoExporter {
         }
 
         const timestampMicros = Math.round(t * 1000000);
-        const videoFrame = new VideoFrame(renderCanvas, { timestamp: timestampMicros });
+        const videoFrame = new VideoFrame(renderCanvas, {
+          timestamp: timestampMicros,
+          duration: frameDurationMicros
+        });
         const keyFrame = (frameIdx % (fps * 2) === 0);
         videoEncoder.encode(videoFrame, { keyFrame });
         videoFrame.close();
@@ -1023,11 +1042,7 @@ export class VideoExporter {
       if (this.cancelRequested || err.message?.includes('cancelled')) {
         throw err;
       }
-      if (hasVoice) {
-        // If a voice exists and WebCodecs fails, THROW an error. Never silently fall back.
-        throw err;
-      }
-      console.warn('[WebCodecs] Silent render failed, falling back to MediaRecorder:', err);
+      console.warn('[WebCodecs] Render encountered an issue, falling back to MediaRecorder real-time engine:', err);
       return await this.exportWithVoice(appState, onProgress, miniThumbCanvas);
     }
   }
