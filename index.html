@@ -478,9 +478,12 @@
                   <h3>Spoken Script Content</h3>
                   <span class="badge badge-accent">Devanagari Hindi or English</span>
                 </div>
-                <div style="display: flex; gap: 0.5rem;">
+                <div style="display: flex; gap: 0.5rem; flex-wrap: wrap;">
                   <button type="button" id="loadSampleScriptBtn" class="btn btn-xs btn-outline">
                     📜 Load Sample Script
+                  </button>
+                  <button type="button" id="formatScriptLinesBtn" class="btn btn-xs btn-outline" title="Format script line-by-line at full stops (., ।) and commas (,) for natural voice flow">
+                    ✍️ Line-by-Line (., ।)
                   </button>
                   <button type="button" id="realignCaptionsBtn" class="btn btn-xs btn-secondary">
                     Auto-Align Captions
@@ -617,6 +620,25 @@
                     <button type="button" class="preset-pill" data-preset="hyper2x" data-rate="2.0" data-pitch="1.0">⏩ 2.0x</button>
                     <button type="button" class="preset-pill" data-preset="max25x" data-rate="2.5" data-pitch="1.05">🚀 2.5x</button>
                     <button type="button" class="preset-pill" data-preset="deep" data-rate="0.9" data-pitch="0.75">📻 Deep Voice</button>
+                  </div>
+                </div>
+
+                <!-- Voice Flow Pacing & Punctuation Pauses -->
+                <div class="form-group" style="margin-top: 0.75rem;">
+                  <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 0.35rem;">
+                    <label class="form-label" style="margin-bottom: 0;">⏳ Voice Flow Pauses (., ।, ,)</label>
+                    <span class="text-xs text-muted" id="flowPacingBadge">Natural (0.45s / 0.22s)</span>
+                  </div>
+                  <div class="preset-pills" id="voiceFlowPills" style="margin-top: 0.25rem;">
+                    <button type="button" class="preset-pill active flow-pill" data-flow="natural" data-stop="0.45" data-comma="0.22">🍃 Natural (0.45s / 0.22s)</button>
+                    <button type="button" class="preset-pill flow-pill" data-flow="dramatic" data-stop="0.65" data-comma="0.35">🎭 Dramatic (0.65s / 0.35s)</button>
+                    <button type="button" class="preset-pill flow-pill" data-flow="fast" data-stop="0.25" data-comma="0.12">⚡ Fast Reels (0.25s / 0.12s)</button>
+                  </div>
+                  <div style="margin-top: 0.5rem; display: flex; align-items: center; gap: 0.5rem;">
+                    <label class="checkbox-label text-xs" style="cursor: pointer; display: flex; align-items: center; gap: 0.35rem; color: var(--text-secondary);">
+                      <input type="checkbox" id="splitOnCommaCheck">
+                      <span>Break caption chunks at commas (,) as well as full stops</span>
+                    </label>
                   </div>
                 </div>
 

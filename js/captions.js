@@ -94,16 +94,22 @@ export class CaptionEngine {
 
   /**
    * Splits a script into sentence chunks respecting Hindi Danda '।', '.', '?', '!', newlines,
-   * and caps chunk length to ~90 characters by splitting at commas or spaces.
+   * commas (if splitOnComma is enabled), and caps chunk length to ~90 characters.
    * @param {string} text 
+   * @param {object} [options] { splitOnComma: boolean, maxChars: number }
    * @returns {Array<string>}
    */
-  splitScriptIntoSentences(text) {
+  splitScriptIntoSentences(text, options = {}) {
     if (!text || !text.trim()) return [];
 
-    // Split on Hindi Danda '।', '.', '?', '!', '\n', '\r'
+    const splitOnComma = Boolean(options?.splitOnComma);
+    const pattern = splitOnComma
+      ? /([।\.\?!;\n\r]+|[,،]+)/g
+      : /([।\.\?!;\n\r]+)/g;
+
+    // Split on designated punctuation boundaries
     const rawSentences = text
-      .split(/([।\.\?!;\n\r]+)/g)
+      .split(pattern)
       .reduce((acc, part, idx, arr) => {
         if (idx % 2 === 0) {
           const punctuation = arr[idx + 1] || '';
@@ -114,7 +120,7 @@ export class CaptionEngine {
       }, []);
 
     const chunks = [];
-    const MAX_CHUNK_CHARS = 90;
+    const MAX_CHUNK_CHARS = options?.maxChars || 90;
 
     for (const sentence of rawSentences) {
       if (sentence.length <= MAX_CHUNK_CHARS) {
@@ -141,6 +147,32 @@ export class CaptionEngine {
     }
 
     return chunks;
+  }
+
+  /**
+   * Formats a script so each sentence or clause ending in full stop (., ।),
+   * question mark, exclamation, or comma is placed on its own line for natural voice flow.
+   * @param {string} text 
+   * @returns {string}
+   */
+  formatScriptLineByLine(text) {
+    if (!text || !text.trim()) return '';
+    const clean = text.replace(/\r\n/g, '\n').replace(/\r/g, '\n');
+    const rawParts = clean
+      .split(/([।\.\?!]+|[,;،]+|\n+)/g)
+      .reduce((acc, part, idx, arr) => {
+        if (idx % 2 === 0) {
+          const punct = arr[idx + 1] || '';
+          if (punct.includes('\n')) {
+            if (part.trim()) acc.push(part.trim());
+          } else {
+            const combined = (part + punct).trim();
+            if (combined) acc.push(combined);
+          }
+        }
+        return acc;
+      }, []);
+    return rawParts.join('\n');
   }
 
 

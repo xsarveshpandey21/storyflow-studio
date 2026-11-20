@@ -919,18 +919,14 @@ export class VideoExporter {
       // 3. Encode video frames with back-pressure and error capture
       const frameDurationMicros = Math.round(1000000 / fps);
       let videoEncoderError = null;
-      let firstMeta = null;
       const videoEncoder = new VideoEncoder({
         output: (chunk, meta) => {
-          if (meta && meta.decoderConfig) {
-            firstMeta = meta;
-          }
           const dur = (Number.isFinite(chunk.duration) && chunk.duration > 0)
             ? chunk.duration
             : frameDurationMicros;
           const data = new Uint8Array(chunk.byteLength);
           chunk.copyTo(data);
-          muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, dur, meta || firstMeta);
+          muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, dur, meta);
         },
         error: (e) => {
           console.error('[WebCodecs VideoEncoder Error]', e);

@@ -1756,6 +1756,42 @@ Life moves forward with small, beautiful moments that stay with us forever.
       this.ui.showToast('Captions realigned with audio timing.', 'success');
     });
 
+    // Format Script Line-by-Line at full stops & commas
+    document.getElementById('formatScriptLinesBtn')?.addEventListener('click', () => {
+      const ta = document.getElementById('scriptTextarea');
+      if (ta && ta.value.trim()) {
+        const formatted = this.captionEngine.formatScriptLineByLine(ta.value);
+        ta.value = formatted;
+        this.handleScriptChange(formatted);
+        this.ui.showToast('✍️ Formatted script line-by-line at full stops & commas!', 'success');
+      }
+    });
+
+    // Voice Flow Pacing Pills (Natural, Dramatic, Fast Reels)
+    document.querySelectorAll('#voiceFlowPills .flow-pill').forEach((pill) => {
+      pill.addEventListener('click', () => {
+        document.querySelectorAll('#voiceFlowPills .flow-pill').forEach((p) => p.classList.remove('active'));
+        pill.classList.add('active');
+        const flow = pill.dataset.flow || 'natural';
+        const stopSec = parseFloat(pill.dataset.stop) || 0.45;
+        const commaSec = parseFloat(pill.dataset.comma) || 0.22;
+        this.state.ttsOptions.pausePacing = flow;
+        this.state.ttsOptions.pauseFullStop = stopSec;
+        this.state.ttsOptions.pauseComma = commaSec;
+        const badge = document.getElementById('flowPacingBadge');
+        if (badge) badge.textContent = `${flow.charAt(0).toUpperCase() + flow.slice(1)} (${stopSec}s / ${commaSec}s)`;
+        this.recalculateTtsTimelineDuration();
+        this.ui.showToast(`Voice flow set to ${flow} pauses (${stopSec}s / ${commaSec}s)`, 'info', 2500);
+      });
+    });
+
+    // Toggle breaking captions at commas
+    document.getElementById('splitOnCommaCheck')?.addEventListener('change', (e) => {
+      this.state.ttsOptions.splitByComma = Boolean(e.target.checked);
+      this.handleScriptChange(this.state.scriptText);
+      this.ui.showToast(e.target.checked ? 'Captions split by commas & full stops.' : 'Captions split by full stops.', 'info', 2000);
+    });
+
     // Voice Mode Tabs (Mode B: My own voice vs Mode A: TTS)
     const btnB = document.getElementById('voiceModeBtnB') || document.getElementById('tabModeB');
     const btnA = document.getElementById('voiceModeBtnA') || document.getElementById('tabModeA');
@@ -1996,11 +2032,20 @@ Life moves forward with small, beautiful moments that stay with us forever.
     this.state.ttsOptions.volume = finalVolume;
     this.state.ttsOptions.voice = voice;
 
+    const pausePacing = this.state.ttsOptions.pausePacing || 'natural';
+    const pauseFullStop = this.state.ttsOptions.pauseFullStop ?? 0.45;
+    const pauseComma = this.state.ttsOptions.pauseComma ?? 0.22;
+    const splitByComma = Boolean(this.state.ttsOptions.splitByComma);
+
     return {
       voice,
       rate: finalRate,
       pitch: finalPitch,
-      volume: finalVolume
+      volume: finalVolume,
+      pausePacing,
+      pauseFullStop,
+      pauseComma,
+      splitByComma
     };
   }
 
@@ -2109,8 +2154,9 @@ Life moves forward with small, beautiful moments that stay with us forever.
     document.getElementById('scriptWordCount').textContent = words;
     document.getElementById('scriptEstTime').textContent = this.ui.formatTime(estSec);
 
-    // Sentence splitting
-    const rawSentences = this.captionEngine.splitScriptIntoSentences(text);
+    // Sentence splitting respecting user's voice flow & punctuation preference
+    const splitOpts = { splitOnComma: Boolean(this.state.ttsOptions?.splitByComma) };
+    const rawSentences = this.captionEngine.splitScriptIntoSentences(text, splitOpts);
     document.getElementById('scriptChunksCount').textContent = rawSentences.length;
 
     // Auto-detect Hindi script and switch language filter if needed
@@ -2129,7 +2175,8 @@ Life moves forward with small, beautiful moments that stay with us forever.
   }
 
   realignCaptionsWithCurrentVoice() {
-    const rawSentences = this.captionEngine.splitScriptIntoSentences(this.state.scriptText);
+    const splitOpts = { splitOnComma: Boolean(this.state.ttsOptions?.splitByComma) };
+    const rawSentences = this.captionEngine.splitScriptIntoSentences(this.state.scriptText, splitOpts);
     const targetDuration = this.getEffectiveTimelineDuration();
 
     const aligned = this.captionEngine.alignCaptionsWithAudio(
@@ -2670,8 +2717,18 @@ Life moves forward with small, beautiful moments that stay with us forever.
     if (this.state.voiceMode !== 'A') return;
     const words = this.state.scriptText.trim() ? this.state.scriptText.trim().split(/\s+/).length : 0;
     const rate = this.state.ttsOptions.rate || 1.0;
-    // Base speaking rate: ~130 words per minute
-    const estSec = Math.max(10, Math.round((words / (130 * rate)) * 60));
+    // Base speaking rate: ~130 words per minute + punctuation pauses (full stops & commas)
+    const splitOpts = { splitOnComma: Boolean(this.state.ttsOptions?.splitByComma) };
+    const chunks = this.captionEngine.splitScriptIntoSentences(this.state.scriptText, splitOpts);
+    let pauseTotal = 0;
+    const stopPause = this.state.ttsOptions.pauseFullStop ?? 0.45;
+    const commaPause = this.state.ttsOptions.pauseComma ?? 0.22;
+    for (const c of chunks) {
+      if (/[।\.\?!]/.test(c)) pauseTotal += stopPause;
+      else if (/[,;،:—]/.test(c)) pauseTotal += commaPause;
+      else pauseTotal += 0.3;
+    }
+    const estSec = Math.max(10, Math.round(((words / (130 * rate)) * 60) + pauseTotal));
     this.voiceEngine.audioDuration = estSec;
     if (this.state.durationMode === 'match-voice') {
       this.state.timelineDuration = estSec;

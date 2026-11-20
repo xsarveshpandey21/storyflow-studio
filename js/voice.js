@@ -444,12 +444,13 @@ export class VoiceEngine {
       const item = decodedItems[i];
       totalSamples += item.audioBuffer.length;
 
-      // Pause calculation: 0.25s after । . ? !, 0.1s after commas, 0.15s otherwise
-      let pauseSec = 0.20;
+      // Voice Flow Pause calculation:
+      // Natural breathing room based on full stop (., ।), comma (,, ،), and punctuation
+      let pauseSec = (options.pauseDefault !== undefined) ? options.pauseDefault : 0.30;
       if (/[।\.\?!]/.test(item.text)) {
-        pauseSec = 0.25;
-      } else if (/[,;،]/.test(item.text)) {
-        pauseSec = 0.10;
+        pauseSec = (options.pauseFullStop !== undefined) ? options.pauseFullStop : 0.45;
+      } else if (/[,;،:—]/.test(item.text)) {
+        pauseSec = (options.pauseComma !== undefined) ? options.pauseComma : 0.22;
       }
 
       const pauseSamples = Math.round(pauseSec * sampleRate);
@@ -1057,7 +1058,14 @@ export class VoiceEngine {
           () => {
             if (this.isSpeakingChunks) {
               currentIndex++;
-              setTimeout(speakNextNeural, 120);
+              // Calculate natural pause based on ending punctuation
+              let pauseMs = 300;
+              if (/[।\.\?!]/.test(text)) {
+                pauseMs = Math.round((ttsOptions.pauseFullStop ?? 0.45) * 1000);
+              } else if (/[,;،:—]/.test(text)) {
+                pauseMs = Math.round((ttsOptions.pauseComma ?? 0.22) * 1000);
+              }
+              setTimeout(speakNextNeural, pauseMs);
             }
           }
         );
@@ -1118,8 +1126,14 @@ export class VoiceEngine {
 
       utterance.onend = () => {
         currentIndex++;
-        // Small pause between sentences
-        setTimeout(speakNext, 120);
+        // Calculate natural pause based on ending punctuation
+        let pauseMs = 300;
+        if (/[।\.\?!]/.test(text)) {
+          pauseMs = Math.round((ttsOptions.pauseFullStop ?? 0.45) * 1000);
+        } else if (/[,;،:—]/.test(text)) {
+          pauseMs = Math.round((ttsOptions.pauseComma ?? 0.22) * 1000);
+        }
+        setTimeout(speakNext, pauseMs);
       };
 
       utterance.onerror = (err) => {

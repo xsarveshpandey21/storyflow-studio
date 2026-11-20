@@ -65,25 +65,18 @@ export class FrameExtractor {
     let blob = frameItem.blob;
 
     // Source 2: IndexedDB ProjectStore if available
-    if (!blob && typeof window !== 'undefined' && window.ProjectStore) {
+    if (!blob && typeof window !== 'undefined' && window.ProjectStore && window.ProjectStore.loadBlob) {
       try {
-        const getter = window.ProjectStore.getBlob || window.ProjectStore.loadBlob;
-        if (getter) {
-          blob = await getter.call(window.ProjectStore, frameItem.id);
-          if (blob) {
-            frameItem.blob = blob;
-            if (!frameItem.previewUrl || frameItem.previewUrl.startsWith('blob:')) {
-              frameItem.previewUrl = URL.createObjectURL(blob);
-            }
-          }
-        }
+        blob = await window.ProjectStore.loadBlob(frameItem.id);
+        if (blob) frameItem.blob = blob;
       } catch (e) {}
     }
 
-    // Source 3: Convert dataUrl to Blob (only real data: URLs, never fetch stale blob: URLs)
-    if (!blob && frameItem.dataUrl && typeof frameItem.dataUrl === 'string' && frameItem.dataUrl.startsWith('data:')) {
+    // Source 3: Convert dataUrl or previewUrl to Blob
+    if (!blob && (frameItem.dataUrl || frameItem.previewUrl)) {
       try {
-        const res = await fetch(frameItem.dataUrl);
+        const src = frameItem.dataUrl || frameItem.previewUrl;
+        const res = await fetch(src);
         blob = await res.blob();
         if (blob) frameItem.blob = blob;
       } catch (e) {}

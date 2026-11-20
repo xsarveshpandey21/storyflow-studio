@@ -1337,13 +1337,17 @@ export class StoryFlowController {
       if (this.app.state.voiceMode === 'A' && (this.app.state.scriptText || '').trim() && !this.app.voiceEngine?.audioBuffer) {
         try {
           if (progressTitle) progressTitle.textContent = 'Generating Neural Voice (Neural TTS)...';
-          const sentences = this.app.captionEngine.splitScriptIntoSentences(this.app.state.scriptText);
+          const splitOpts = { splitOnComma: Boolean(this.app.state.ttsOptions?.splitByComma) };
+          const sentences = this.app.captionEngine.splitScriptIntoSentences(this.app.state.scriptText, splitOpts);
           const ttsOpts = this.app.getTtsOptions();
           const ttsResult = await this.app.voiceEngine.generateVoiceFromScript(sentences, {
             voice: ttsOpts.voice,
             rate: ttsOpts.rate,
             pitch: ttsOpts.pitch,
-            volume: ttsOpts.volume
+            volume: ttsOpts.volume,
+            pauseFullStop: ttsOpts.pauseFullStop,
+            pauseComma: ttsOpts.pauseComma,
+            pausePacing: ttsOpts.pausePacing
           });
           if (ttsResult?.buffer) {
             this.app.onVoiceLoaded(ttsResult.buffer, 'tts_voice.wav', true);
@@ -1476,13 +1480,17 @@ ${comment}
         const scriptText = (this.app.state.scriptText || '').trim();
         if (scriptText) {
           if (progressTitle) progressTitle.textContent = 'Generating Neural Voice for Dual Export...';
-          const sentences = this.app.captionEngine.splitScriptIntoSentences(scriptText);
+          const splitOpts = { splitOnComma: Boolean(this.app.state.ttsOptions?.splitByComma) };
+          const sentences = this.app.captionEngine.splitScriptIntoSentences(scriptText, splitOpts);
           const ttsOpts = this.app.getTtsOptions();
           const ttsResult = await this.app.voiceEngine.generateVoiceFromScript(sentences, {
             voice: ttsOpts.voice,
             rate: ttsOpts.rate,
             pitch: ttsOpts.pitch,
-            volume: ttsOpts.volume
+            volume: ttsOpts.volume,
+            pauseFullStop: ttsOpts.pauseFullStop,
+            pauseComma: ttsOpts.pauseComma,
+            pausePacing: ttsOpts.pausePacing
           });
           if (ttsResult?.buffer) {
             this.app.onVoiceLoaded(ttsResult.buffer, 'tts_voice.wav', true);

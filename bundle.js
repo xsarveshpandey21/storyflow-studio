@@ -47,24 +47,17 @@
         }
       }
       let blob = frameItem.blob;
-      if (!blob && typeof window !== "undefined" && window.ProjectStore) {
+      if (!blob && typeof window !== "undefined" && window.ProjectStore && window.ProjectStore.loadBlob) {
         try {
-          const getter = window.ProjectStore.getBlob || window.ProjectStore.loadBlob;
-          if (getter) {
-            blob = await getter.call(window.ProjectStore, frameItem.id);
-            if (blob) {
-              frameItem.blob = blob;
-              if (!frameItem.previewUrl || frameItem.previewUrl.startsWith("blob:")) {
-                frameItem.previewUrl = URL.createObjectURL(blob);
-              }
-            }
-          }
+          blob = await window.ProjectStore.loadBlob(frameItem.id);
+          if (blob) frameItem.blob = blob;
         } catch (e) {
         }
       }
-      if (!blob && frameItem.dataUrl && typeof frameItem.dataUrl === "string" && frameItem.dataUrl.startsWith("data:")) {
+      if (!blob && (frameItem.dataUrl || frameItem.previewUrl)) {
         try {
-          const res = await fetch(frameItem.dataUrl);
+          const src = frameItem.dataUrl || frameItem.previewUrl;
+          const res = await fetch(src);
           blob = await res.blob();
           if (blob) frameItem.blob = blob;
         } catch (e) {
@@ -1028,11 +1021,11 @@
       for (let i = 0; i < decodedItems.length; i++) {
         const item = decodedItems[i];
         totalSamples += item.audioBuffer.length;
-        let pauseSec = 0.2;
+        let pauseSec = options.pauseDefault !== void 0 ? options.pauseDefault : 0.3;
         if (/[।\.\?!]/.test(item.text)) {
-          pauseSec = 0.25;
-        } else if (/[,;،]/.test(item.text)) {
-          pauseSec = 0.1;
+          pauseSec = options.pauseFullStop !== void 0 ? options.pauseFullStop : 0.45;
+        } else if (/[,;،:—]/.test(item.text)) {
+          pauseSec = options.pauseComma !== void 0 ? options.pauseComma : 0.22;
         }
         const pauseSamples = Math.round(pauseSec * sampleRate);
         pauses.push(pauseSamples);
@@ -1552,7 +1545,13 @@
             () => {
               if (this.isSpeakingChunks) {
                 currentIndex2++;
-                setTimeout(speakNextNeural, 120);
+                let pauseMs = 300;
+                if (/[।\.\?!]/.test(text)) {
+                  pauseMs = Math.round((ttsOptions.pauseFullStop ?? 0.45) * 1e3);
+                } else if (/[,;،:—]/.test(text)) {
+                  pauseMs = Math.round((ttsOptions.pauseComma ?? 0.22) * 1e3);
+                }
+                setTimeout(speakNextNeural, pauseMs);
               }
             }
           );
@@ -1601,7 +1600,13 @@
         }
         utterance.onend = () => {
           currentIndex++;
-          setTimeout(speakNext, 120);
+          let pauseMs = 300;
+          if (/[।\.\?!]/.test(text)) {
+            pauseMs = Math.round((ttsOptions.pauseFullStop ?? 0.45) * 1e3);
+          } else if (/[,;،:—]/.test(text)) {
+            pauseMs = Math.round((ttsOptions.pauseComma ?? 0.22) * 1e3);
+          }
+          setTimeout(speakNext, pauseMs);
         };
         utterance.onerror = (err) => {
           console.warn("[TTS] Speech error:", err);
@@ -1701,13 +1706,16 @@
     }
     /**
      * Splits a script into sentence chunks respecting Hindi Danda '।', '.', '?', '!', newlines,
-     * and caps chunk length to ~90 characters by splitting at commas or spaces.
+     * commas (if splitOnComma is enabled), and caps chunk length to ~90 characters.
      * @param {string} text 
+     * @param {object} [options] { splitOnComma: boolean, maxChars: number }
      * @returns {Array<string>}
      */
-    splitScriptIntoSentences(text) {
+    splitScriptIntoSentences(text, options = {}) {
       if (!text || !text.trim()) return [];
-      const rawSentences = text.split(/([।\.\?!;\n\r]+)/g).reduce((acc, part, idx, arr) => {
+      const splitOnComma = Boolean(options == null ? void 0 : options.splitOnComma);
+      const pattern = splitOnComma ? /([।\.\?!;\n\r]+|[,،]+)/g : /([।\.\?!;\n\r]+)/g;
+      const rawSentences = text.split(pattern).reduce((acc, part, idx, arr) => {
         if (idx % 2 === 0) {
           const punctuation = arr[idx + 1] || "";
           const fullSentence = (part + punctuation).trim();
@@ -1716,7 +1724,7 @@
         return acc;
       }, []);
       const chunks = [];
-      const MAX_CHUNK_CHARS = 90;
+      const MAX_CHUNK_CHARS = (options == null ? void 0 : options.maxChars) || 90;
       for (const sentence of rawSentences) {
         if (sentence.length <= MAX_CHUNK_CHARS) {
           chunks.push(sentence);
@@ -1739,6 +1747,29 @@
         }
       }
       return chunks;
+    }
+    /**
+     * Formats a script so each sentence or clause ending in full stop (., ।),
+     * question mark, exclamation, or comma is placed on its own line for natural voice flow.
+     * @param {string} text 
+     * @returns {string}
+     */
+    formatScriptLineByLine(text) {
+      if (!text || !text.trim()) return "";
+      const clean = text.replace(/\r\n/g, "\n").replace(/\r/g, "\n");
+      const rawParts = clean.split(/([।\.\?!]+|[,;،]+|\n+)/g).reduce((acc, part, idx, arr) => {
+        if (idx % 2 === 0) {
+          const punct = arr[idx + 1] || "";
+          if (punct.includes("\n")) {
+            if (part.trim()) acc.push(part.trim());
+          } else {
+            const combined = (part + punct).trim();
+            if (combined) acc.push(combined);
+          }
+        }
+        return acc;
+      }, []);
+      return rawParts.join("\n");
     }
     /**
      * Speech-aware caption alignment with spoken-unit weighting and silence snapping.
@@ -5359,16 +5390,12 @@ If you want to offset all timestamps of a track such that the first one is zero,
         }
         const frameDurationMicros = Math.round(1e6 / fps);
         let videoEncoderError = null;
-        let firstMeta = null;
         const videoEncoder = new VideoEncoder({
           output: (chunk, meta) => {
-            if (meta && meta.decoderConfig) {
-              firstMeta = meta;
-            }
             const dur = Number.isFinite(chunk.duration) && chunk.duration > 0 ? chunk.duration : frameDurationMicros;
             const data = new Uint8Array(chunk.byteLength);
             chunk.copyTo(data);
-            muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, dur, meta || firstMeta);
+            muxer.addVideoChunkRaw(data, chunk.type, chunk.timestamp, dur, meta);
           },
           error: (e) => {
             console.error("[WebCodecs VideoEncoder Error]", e);
@@ -9551,7 +9578,7 @@ ${script}
       var _a, _b, _c;
       this.exportMp4Btn = document.getElementById("exportMp4Btn");
       (_a = this.exportMp4Btn) == null ? void 0 : _a.addEventListener("click", async () => {
-        var _a2, _b2, _c2, _d, _e, _f, _g, _h;
+        var _a2, _b2, _c2, _d, _e, _f, _g, _h, _i;
         if ((this.app.state.extractedFrames || []).length === 0) {
           (_b2 = (_a2 = this.app) == null ? void 0 : _a2.ui) == null ? void 0 : _b2.showToast("Please add photos or extract frames in Step 1 first!", "warning");
           return;
@@ -9562,13 +9589,17 @@ ${script}
         if (this.app.state.voiceMode === "A" && (this.app.state.scriptText || "").trim() && !((_c2 = this.app.voiceEngine) == null ? void 0 : _c2.audioBuffer)) {
           try {
             if (progressTitle) progressTitle.textContent = "Generating Neural Voice (Neural TTS)...";
-            const sentences = this.app.captionEngine.splitScriptIntoSentences(this.app.state.scriptText);
+            const splitOpts = { splitOnComma: Boolean((_d = this.app.state.ttsOptions) == null ? void 0 : _d.splitByComma) };
+            const sentences = this.app.captionEngine.splitScriptIntoSentences(this.app.state.scriptText, splitOpts);
             const ttsOpts = this.app.getTtsOptions();
             const ttsResult = await this.app.voiceEngine.generateVoiceFromScript(sentences, {
               voice: ttsOpts.voice,
               rate: ttsOpts.rate,
               pitch: ttsOpts.pitch,
-              volume: ttsOpts.volume
+              volume: ttsOpts.volume,
+              pauseFullStop: ttsOpts.pauseFullStop,
+              pauseComma: ttsOpts.pauseComma,
+              pausePacing: ttsOpts.pausePacing
             });
             if (ttsResult == null ? void 0 : ttsResult.buffer) {
               this.app.onVoiceLoaded(ttsResult.buffer, "tts_voice.wav", true);
@@ -9578,7 +9609,7 @@ ${script}
           }
         }
         if (progressTitle) {
-          const hasVoice2 = Boolean((_d = this.app.voiceEngine) == null ? void 0 : _d.audioBuffer);
+          const hasVoice2 = Boolean((_e = this.app.voiceEngine) == null ? void 0 : _e.audioBuffer);
           progressTitle.textContent = hasVoice2 ? "Fast Encoding Video & Voice (WebCodecs)..." : "Fast Encoding Video (WebCodecs)...";
         }
         try {
@@ -9590,9 +9621,9 @@ ${script}
           }
           const ratioTag = this.app.state.aspectRatio === "9:16" ? "9x16" : "16x9";
           this.app.exporter.triggerDownload(blob, `storyflow_${ratioTag}.mp4`);
-          (_f = (_e = this.app) == null ? void 0 : _e.ui) == null ? void 0 : _f.showToast("Export completed successfully!", "success");
+          (_g = (_f = this.app) == null ? void 0 : _f.ui) == null ? void 0 : _g.showToast("Export completed successfully!", "success");
         } catch (err) {
-          (_h = (_g = this.app) == null ? void 0 : _g.ui) == null ? void 0 : _h.showToast(`Export failed: ${err.message}`, "error");
+          (_i = (_h = this.app) == null ? void 0 : _h.ui) == null ? void 0 : _i.showToast(`Export failed: ${err.message}`, "error");
         } finally {
           progressModal == null ? void 0 : progressModal.classList.add("hidden");
         }
@@ -9668,7 +9699,7 @@ ${comment}
       this.copyToClipboard(bundle, "Facebook Post Pack");
     }
     async exportBothFormats() {
-      var _a, _b, _c, _d, _e, _f, _g;
+      var _a, _b, _c, _d, _e, _f, _g, _h;
       if (this.exportingDual) return;
       if ((this.app.state.extractedFrames || []).length === 0) {
         (_b = (_a = this.app) == null ? void 0 : _a.ui) == null ? void 0 : _b.showToast("Please add photos or extract frames in Step 1 first!", "warning");
@@ -9683,13 +9714,17 @@ ${comment}
           const scriptText = (this.app.state.scriptText || "").trim();
           if (scriptText) {
             if (progressTitle) progressTitle.textContent = "Generating Neural Voice for Dual Export...";
-            const sentences = this.app.captionEngine.splitScriptIntoSentences(scriptText);
+            const splitOpts = { splitOnComma: Boolean((_d = this.app.state.ttsOptions) == null ? void 0 : _d.splitByComma) };
+            const sentences = this.app.captionEngine.splitScriptIntoSentences(scriptText, splitOpts);
             const ttsOpts = this.app.getTtsOptions();
             const ttsResult = await this.app.voiceEngine.generateVoiceFromScript(sentences, {
               voice: ttsOpts.voice,
               rate: ttsOpts.rate,
               pitch: ttsOpts.pitch,
-              volume: ttsOpts.volume
+              volume: ttsOpts.volume,
+              pauseFullStop: ttsOpts.pauseFullStop,
+              pauseComma: ttsOpts.pauseComma,
+              pausePacing: ttsOpts.pausePacing
             });
             if (ttsResult == null ? void 0 : ttsResult.buffer) {
               this.app.onVoiceLoaded(ttsResult.buffer, "tts_voice.wav", true);
@@ -9709,9 +9744,9 @@ ${comment}
         const blob916 = await this.renderVideoBlob();
         this.cachedBlob916 = blob916;
         this.app.exporter.triggerDownload(blob916, "storyflow_9x16.mp4");
-        (_e = (_d = this.app) == null ? void 0 : _d.ui) == null ? void 0 : _e.showToast("\u{1F389} Both 16:9 and 9:16 videos rendered successfully!", "success", 6e3);
+        (_f = (_e = this.app) == null ? void 0 : _e.ui) == null ? void 0 : _f.showToast("\u{1F389} Both 16:9 and 9:16 videos rendered successfully!", "success", 6e3);
       } catch (err) {
-        (_g = (_f = this.app) == null ? void 0 : _f.ui) == null ? void 0 : _g.showToast(`Dual export failed: ${err.message}`, "error", 6e3);
+        (_h = (_g = this.app) == null ? void 0 : _g.ui) == null ? void 0 : _h.showToast(`Dual export failed: ${err.message}`, "error", 6e3);
       } finally {
         progressModal == null ? void 0 : progressModal.classList.add("hidden");
         this.exportingDual = false;
@@ -11719,7 +11754,7 @@ ${fb.first_comment || ""}
     // Step 2: Script & Voice-Over
     // =========================================================================
     bindStep2Events() {
-      var _a, _b, _c, _d, _e, _f, _g, _h;
+      var _a, _b, _c, _d, _e, _f, _g, _h, _i, _j;
       const scriptTextarea = document.getElementById("scriptTextarea");
       scriptTextarea.addEventListener("input", () => {
         this.handleScriptChange(scriptTextarea.value);
@@ -11738,6 +11773,36 @@ Life moves forward with small, beautiful moments that stay with us forever.
         this.realignCaptionsWithCurrentVoice();
         this.ui.showToast("Captions realigned with audio timing.", "success");
       });
+      (_c = document.getElementById("formatScriptLinesBtn")) == null ? void 0 : _c.addEventListener("click", () => {
+        const ta = document.getElementById("scriptTextarea");
+        if (ta && ta.value.trim()) {
+          const formatted = this.captionEngine.formatScriptLineByLine(ta.value);
+          ta.value = formatted;
+          this.handleScriptChange(formatted);
+          this.ui.showToast("\u270D\uFE0F Formatted script line-by-line at full stops & commas!", "success");
+        }
+      });
+      document.querySelectorAll("#voiceFlowPills .flow-pill").forEach((pill) => {
+        pill.addEventListener("click", () => {
+          document.querySelectorAll("#voiceFlowPills .flow-pill").forEach((p) => p.classList.remove("active"));
+          pill.classList.add("active");
+          const flow = pill.dataset.flow || "natural";
+          const stopSec = parseFloat(pill.dataset.stop) || 0.45;
+          const commaSec = parseFloat(pill.dataset.comma) || 0.22;
+          this.state.ttsOptions.pausePacing = flow;
+          this.state.ttsOptions.pauseFullStop = stopSec;
+          this.state.ttsOptions.pauseComma = commaSec;
+          const badge = document.getElementById("flowPacingBadge");
+          if (badge) badge.textContent = `${flow.charAt(0).toUpperCase() + flow.slice(1)} (${stopSec}s / ${commaSec}s)`;
+          this.recalculateTtsTimelineDuration();
+          this.ui.showToast(`Voice flow set to ${flow} pauses (${stopSec}s / ${commaSec}s)`, "info", 2500);
+        });
+      });
+      (_d = document.getElementById("splitOnCommaCheck")) == null ? void 0 : _d.addEventListener("change", (e) => {
+        this.state.ttsOptions.splitByComma = Boolean(e.target.checked);
+        this.handleScriptChange(this.state.scriptText);
+        this.ui.showToast(e.target.checked ? "Captions split by commas & full stops." : "Captions split by full stops.", "info", 2e3);
+      });
       const btnB = document.getElementById("voiceModeBtnB") || document.getElementById("tabModeB");
       const btnA = document.getElementById("voiceModeBtnA") || document.getElementById("tabModeA");
       btnB == null ? void 0 : btnB.addEventListener("click", () => {
@@ -11746,14 +11811,14 @@ Life moves forward with small, beautiful moments that stay with us forever.
       btnA == null ? void 0 : btnA.addEventListener("click", () => {
         this.setVoiceMode("A");
       });
-      (_c = document.getElementById("subTabUpload")) == null ? void 0 : _c.addEventListener("click", (e) => {
+      (_e = document.getElementById("subTabUpload")) == null ? void 0 : _e.addEventListener("click", (e) => {
         var _a2, _b2, _c2;
         e.target.classList.add("active");
         (_a2 = document.getElementById("subTabRecord")) == null ? void 0 : _a2.classList.remove("active");
         (_b2 = document.getElementById("audioUploadArea")) == null ? void 0 : _b2.classList.remove("hidden");
         (_c2 = document.getElementById("audioRecordArea")) == null ? void 0 : _c2.classList.add("hidden");
       });
-      (_d = document.getElementById("subTabRecord")) == null ? void 0 : _d.addEventListener("click", (e) => {
+      (_f = document.getElementById("subTabRecord")) == null ? void 0 : _f.addEventListener("click", (e) => {
         var _a2, _b2, _c2;
         e.target.classList.add("active");
         (_a2 = document.getElementById("subTabUpload")) == null ? void 0 : _a2.classList.remove("active");
@@ -11849,22 +11914,22 @@ Life moves forward with small, beautiful moments that stay with us forever.
         if (playTtsBtn) playTtsBtn.textContent = "\u25B6 Play Voice";
         stopTtsBtn == null ? void 0 : stopTtsBtn.classList.add("hidden");
       });
-      (_e = document.getElementById("reRecordBtn")) == null ? void 0 : _e.addEventListener("click", () => {
+      (_g = document.getElementById("reRecordBtn")) == null ? void 0 : _g.addEventListener("click", () => {
         var _a2, _b2;
         this.voiceEngine.stopPreview();
         (_a2 = document.getElementById("audioPlayerPanel")) == null ? void 0 : _a2.classList.add("hidden");
         (_b2 = document.getElementById("subTabUpload")) == null ? void 0 : _b2.click();
       });
-      (_f = document.getElementById("toggleAbTestBtn")) == null ? void 0 : _f.addEventListener("click", (e) => {
+      (_h = document.getElementById("toggleAbTestBtn")) == null ? void 0 : _h.addEventListener("click", (e) => {
         this.voiceEngine.settings.abCleanedActive = !this.voiceEngine.settings.abCleanedActive;
         const on = this.voiceEngine.settings.abCleanedActive;
         e.target.textContent = on ? "\u{1F50A} Test: Cleaned (ON)" : "\u{1F507} Test: Raw Audio (OFF)";
         this.ui.showToast(on ? "Audio DSP clean-up active" : "Audio DSP bypassed (Raw)", "info");
       });
-      (_g = document.getElementById("enableNoiseReduction")) == null ? void 0 : _g.addEventListener("change", (e) => {
+      (_i = document.getElementById("enableNoiseReduction")) == null ? void 0 : _i.addEventListener("change", (e) => {
         this.voiceEngine.settings.reduceNoise = e.target.checked;
       });
-      (_h = document.getElementById("enableNormalize")) == null ? void 0 : _h.addEventListener("change", (e) => {
+      (_j = document.getElementById("enableNormalize")) == null ? void 0 : _j.addEventListener("change", (e) => {
         this.voiceEngine.settings.normalize = e.target.checked;
       });
       const lowSlider = document.getElementById("eqLowSlider");
@@ -11943,11 +12008,19 @@ Life moves forward with small, beautiful moments that stay with us forever.
       this.state.ttsOptions.pitch = finalPitch;
       this.state.ttsOptions.volume = finalVolume;
       this.state.ttsOptions.voice = voice;
+      const pausePacing = this.state.ttsOptions.pausePacing || "natural";
+      const pauseFullStop = this.state.ttsOptions.pauseFullStop ?? 0.45;
+      const pauseComma = this.state.ttsOptions.pauseComma ?? 0.22;
+      const splitByComma = Boolean(this.state.ttsOptions.splitByComma);
       return {
         voice,
         rate: finalRate,
         pitch: finalPitch,
-        volume: finalVolume
+        volume: finalVolume,
+        pausePacing,
+        pauseFullStop,
+        pauseComma,
+        splitByComma
       };
     }
     /**
@@ -12025,7 +12098,7 @@ Life moves forward with small, beautiful moments that stay with us forever.
       }
     }
     handleScriptChange(text) {
-      var _a, _b;
+      var _a, _b, _c;
       this.state.scriptText = text;
       const charCount = text.length;
       const words = text.trim() ? text.trim().split(/\s+/).length : 0;
@@ -12034,7 +12107,8 @@ Life moves forward with small, beautiful moments that stay with us forever.
       document.getElementById("scriptCharCount").textContent = charCount;
       document.getElementById("scriptWordCount").textContent = words;
       document.getElementById("scriptEstTime").textContent = this.ui.formatTime(estSec);
-      const rawSentences = this.captionEngine.splitScriptIntoSentences(text);
+      const splitOpts = { splitOnComma: Boolean((_b = this.state.ttsOptions) == null ? void 0 : _b.splitByComma) };
+      const rawSentences = this.captionEngine.splitScriptIntoSentences(text, splitOpts);
       document.getElementById("scriptChunksCount").textContent = rawSentences.length;
       const hasHindi = /[\u0900-\u097F]/.test(text);
       const langSelect = document.getElementById("ttsLanguageSelect");
@@ -12046,10 +12120,12 @@ Life moves forward with small, beautiful moments that stay with us forever.
         this.recalculateTtsTimelineDuration();
       }
       this.realignCaptionsWithCurrentVoice();
-      (_b = this.youtubeGenerator) == null ? void 0 : _b.updateScriptSummary();
+      (_c = this.youtubeGenerator) == null ? void 0 : _c.updateScriptSummary();
     }
     realignCaptionsWithCurrentVoice() {
-      const rawSentences = this.captionEngine.splitScriptIntoSentences(this.state.scriptText);
+      var _a;
+      const splitOpts = { splitOnComma: Boolean((_a = this.state.ttsOptions) == null ? void 0 : _a.splitByComma) };
+      const rawSentences = this.captionEngine.splitScriptIntoSentences(this.state.scriptText, splitOpts);
       const targetDuration = this.getEffectiveTimelineDuration();
       const aligned = this.captionEngine.alignCaptionsWithAudio(
         rawSentences,
@@ -12506,10 +12582,21 @@ Life moves forward with small, beautiful moments that stay with us forever.
       detailsEl.textContent = `${badge} \xB7 ${voice.lang || "en"} \xB7 ${name}`;
     }
     recalculateTtsTimelineDuration() {
+      var _a;
       if (this.state.voiceMode !== "A") return;
       const words = this.state.scriptText.trim() ? this.state.scriptText.trim().split(/\s+/).length : 0;
       const rate = this.state.ttsOptions.rate || 1;
-      const estSec = Math.max(10, Math.round(words / (130 * rate) * 60));
+      const splitOpts = { splitOnComma: Boolean((_a = this.state.ttsOptions) == null ? void 0 : _a.splitByComma) };
+      const chunks = this.captionEngine.splitScriptIntoSentences(this.state.scriptText, splitOpts);
+      let pauseTotal = 0;
+      const stopPause = this.state.ttsOptions.pauseFullStop ?? 0.45;
+      const commaPause = this.state.ttsOptions.pauseComma ?? 0.22;
+      for (const c of chunks) {
+        if (/[।\.\?!]/.test(c)) pauseTotal += stopPause;
+        else if (/[,;،:—]/.test(c)) pauseTotal += commaPause;
+        else pauseTotal += 0.3;
+      }
+      const estSec = Math.max(10, Math.round(words / (130 * rate) * 60 + pauseTotal));
       this.voiceEngine.audioDuration = estSec;
       if (this.state.durationMode === "match-voice") {
         this.state.timelineDuration = estSec;

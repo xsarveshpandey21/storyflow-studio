@@ -89,6 +89,18 @@ const subChunks = captions.splitScriptIntoSentences(longSentence);
 assert(subChunks.length > 1, `Long sentence (>90 chars) was split into ${subChunks.length} readable sub-chunks`);
 assert(subChunks.every(c => c.length <= 95), 'All sub-chunks are within the ~90 character readability limit');
 
+// Voice Flow: Format line-by-line at full stops (., ।) and commas (,)
+const paragraphText = 'सितंबर 1947, लाहौर रेलवे स्टेशन का खचाखच भरा प्लेटफ़ॉर्म। ट्रेन की सीटी बजी, और भीड़ में भगदड़ मच गई।';
+const formattedLines = captions.formatScriptLineByLine(paragraphText);
+const splitLines = formattedLines.split('\n');
+assert(splitLines.length === 4, `formatScriptLineByLine breaks text into 4 lines at full stops and commas (Got: ${splitLines.length})`);
+assert(splitLines[0] === 'सितंबर 1947,', 'First line ends with comma');
+assert(splitLines[1] === 'लाहौर रेलवे स्टेशन का खचाखच भरा प्लेटफ़ॉर्म।', 'Second line ends with Danda');
+
+// Voice Flow: Split on comma enabled
+const commaSplitChunks = captions.splitScriptIntoSentences(paragraphText, { splitOnComma: true });
+assert(commaSplitChunks.length === 4, `splitScriptIntoSentences with splitOnComma=true yields 4 chunks (Got: ${commaSplitChunks.length})`);
+
 // -------------------------------------------------------------
 // Test 3: Caption Alignment & Silence Snapping
 // -------------------------------------------------------------
