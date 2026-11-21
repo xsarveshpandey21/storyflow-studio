@@ -195,8 +195,10 @@
                   <div class="crop-corner bottom-right" data-corner="bottom-right" title="Drag corner to resize"></div>
 
                   <!-- Draggable Sticker / Tag Mark element -->
-                  <div id="draggableCropWatermark" class="draggable-crop-watermark hidden" title="Drag and drop sticker anywhere over video">
-                    <span id="cropWatermarkContent" class="crop-wm-badge">@StoryFlow</span>
+                  <div id="draggableCropWatermark" class="draggable-crop-watermark hidden" title="Drag to reposition, drag corner handle to resize">
+                    <div id="cropWatermarkContent" class="crop-wm-badge">@StoryFlow</div>
+                    <div id="stickerResizeHandle" class="sticker-resize-corner" title="Drag corner to resize sticker"></div>
+                    <div id="stickerTooltip" class="sticker-status-tooltip hidden">18%</div>
                   </div>
                 </div>
 
@@ -389,13 +391,23 @@
                     </select>
                   </div>
 
-                  <div class="form-group">
-                    <label for="watermarkSizeSelect" class="form-label">Sticker Size</label>
-                    <select id="watermarkSizeSelect" class="form-select">
+                  <div class="form-group" style="min-width: 175px;">
+                    <label for="watermarkSizeSlider" class="form-label" style="display: flex; justify-content: space-between; align-items: center;">
+                      <span>Sticker Size</span>
+                      <strong id="watermarkSizeVal" style="color: var(--accent-primary);">18%</strong>
+                    </label>
+                    <input type="range" id="watermarkSizeSlider" min="6" max="50" value="18" step="1" class="range-slider">
+                    <select id="watermarkSizeSelect" class="form-select" style="display: none;">
                       <option value="small">Small (Subtle)</option>
                       <option value="medium" selected>Medium (Standard)</option>
                       <option value="large">Large (Prominent)</option>
                     </select>
+                    <div class="wm-size-presets" id="wmSizePresetsRow" style="display: flex; gap: 4px; margin-top: 4px;">
+                      <button type="button" class="btn btn-xs btn-preset-size" data-size="10" title="Subtle 10% width">10%</button>
+                      <button type="button" class="btn btn-xs btn-preset-size active" data-size="18" title="Standard 18% width">18%</button>
+                      <button type="button" class="btn btn-xs btn-preset-size" data-size="28" title="Prominent 28% width">28%</button>
+                      <button type="button" class="btn btn-xs btn-preset-size" data-size="40" title="Hero 40% width">40%</button>
+                    </div>
                   </div>
 
                   <div class="form-group">

@@ -786,6 +786,113 @@ try {
   await new Promise((resolve) => server.close(resolve));
 }
 
+// -------------------------------------------------------------
+// Test Suite 18: Sticker Sizing & Drag-and-Drop Watermark Placement
+// -------------------------------------------------------------
+console.log('\n--- Test Suite 18: Sticker Sizing & Drag-and-Drop Watermark Placement ---');
+
+const mockCtx = {
+  globalAlpha: 1.0,
+  shadowColor: '',
+  shadowBlur: 0,
+  shadowOffsetX: 0,
+  shadowOffsetY: 0,
+  fillStyle: '',
+  strokeStyle: '',
+  lineWidth: 1,
+  font: '',
+  textAlign: '',
+  textBaseline: '',
+  lastText: '',
+  lastTextX: 0,
+  lastTextY: 0,
+  lastDrawX: 0,
+  lastDrawY: 0,
+  lastDrawW: 0,
+  lastDrawH: 0,
+  save() {},
+  restore() {},
+  beginPath() {},
+  rect() {},
+  roundRect() {},
+  fill() {},
+  stroke() {},
+  fillText(text, x, y) {
+    this.lastText = text;
+    this.lastTextX = x;
+    this.lastTextY = y;
+  },
+  measureText(str) {
+    return { width: str.length * 10 };
+  },
+  drawImage(img, x, y, w, h) {
+    this.lastDrawX = x;
+    this.lastDrawY = y;
+    this.lastDrawW = w;
+    this.lastDrawH = h;
+  }
+};
+
+const wmExtractor = new FrameExtractor(null, null);
+
+// Test 18.1: Text badge with continuous scale
+const textWm = {
+  enabled: true,
+  type: 'text',
+  text: '@StoryFlow',
+  scale: 0.25, // 25% scale
+  position: 'bottom-right',
+  opacity: 0.9
+};
+mockCtx.lastText = '';
+wmExtractor.applyWatermark(mockCtx, 1920, 1080, textWm);
+assert(mockCtx.lastText === '@StoryFlow', 'Watermark applies specified text badge');
+assert(mockCtx.font.includes('px'), 'Font size is set based on scale');
+
+// Test 18.2: Drag-and-Drop custom position for text badge
+const dragTextWm = {
+  enabled: true,
+  type: 'text',
+  text: '@CustomPos',
+  scale: 0.20,
+  position: 'custom',
+  customNorm: { relX: 0.35, relY: 0.55 },
+  opacity: 0.85
+};
+wmExtractor.applyWatermark(mockCtx, 1920, 1080, dragTextWm);
+assert(mockCtx.lastText === '@CustomPos', 'Custom drag-and-drop watermark renders text');
+assert(Math.abs(mockCtx.lastTextX - (1920 * 0.35)) < 150, `Custom X position centers around normalized 35% (Got: ${mockCtx.lastTextX})`);
+
+// Test 18.3: Custom Image Sticker sizing & aspect ratio
+const mockImg = { naturalWidth: 400, naturalHeight: 200, width: 400, height: 200 };
+const imgWm = {
+  enabled: true,
+  type: 'image',
+  imageElement: mockImg,
+  scale: 0.30, // 30% of 1920 = 576px
+  position: 'custom',
+  customNorm: { relX: 0.40, relY: 0.60 },
+  opacity: 0.95
+};
+wmExtractor.applyWatermark(mockCtx, 1920, 1080, imgWm);
+assert(mockCtx.lastDrawW === Math.round(1920 * 0.30), `Image sticker width matches scale 30% (Got: ${mockCtx.lastDrawW}, Expected: 576)`);
+assert(mockCtx.lastDrawH === Math.round(mockCtx.lastDrawW / 2), `Image sticker height maintains 2:1 aspect ratio (Got: ${mockCtx.lastDrawH}, Expected: 288)`);
+assert(mockCtx.lastDrawX === Math.round(1920 * 0.40), `Image sticker X matches drag-drop relX (Got: ${mockCtx.lastDrawX}, Expected: ${Math.round(1920 * 0.40)})`);
+assert(mockCtx.lastDrawY === Math.round(1080 * 0.60), `Image sticker Y matches drag-drop relY (Got: ${mockCtx.lastDrawY}, Expected: ${Math.round(1080 * 0.60)})`);
+
+// Test 18.4: Edge Clamping bounds protection
+const overflowWm = {
+  enabled: true,
+  type: 'image',
+  imageElement: mockImg,
+  scale: 0.30,
+  position: 'custom',
+  customNorm: { relX: 0.99, relY: 0.99 } // Extreme bottom-right drag
+};
+wmExtractor.applyWatermark(mockCtx, 1920, 1080, overflowWm);
+assert(mockCtx.lastDrawX + mockCtx.lastDrawW <= 1920, `Sticker does not overflow horizontal canvas boundary (${mockCtx.lastDrawX + mockCtx.lastDrawW} <= 1920)`);
+assert(mockCtx.lastDrawY + mockCtx.lastDrawH <= 1080, `Sticker does not overflow vertical canvas boundary (${mockCtx.lastDrawY + mockCtx.lastDrawH} <= 1080)`);
+
 console.log(`\n========================================`);
 console.log(`🎉 Test Results: ${passedTests}/${totalTests} tests passed successfully!`);
 console.log(`========================================\n`);

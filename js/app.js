@@ -70,6 +70,8 @@ class FrameFlowApp {
         imageElement: null,
         position: 'bottom-right',
         size: 'medium',
+        scale: 0.18,
+        customNorm: null,
         opacity: 0.85
       },
 
@@ -678,6 +680,7 @@ class FrameFlowApp {
 
     const startCropDrag = (e) => {
       if (isResizingCorner) return;
+      if (e.target?.closest?.('#draggableCropWatermark')) return;
 
       if (this.state.aspectRatio === 'custom') {
         if (!this.state.customNorm) {
@@ -1265,9 +1268,45 @@ class FrameFlowApp {
       this.updateWatermarkLivePreview();
     });
 
-    sizeSelect?.addEventListener('change', () => {
-      this.state.watermark.size = sizeSelect.value;
+    const sizeSlider = document.getElementById('watermarkSizeSlider');
+    const sizeVal = document.getElementById('watermarkSizeVal');
+    const sizePresets = document.querySelectorAll('.btn-preset-size');
+
+    const setScale = (pct, updateSlider = true) => {
+      const clampedPct = Math.max(6, Math.min(50, Math.round(pct)));
+      const frac = clampedPct / 100;
+      this.state.watermark.scale = frac;
+      this.state.watermark.size = clampedPct <= 12 ? 'small' : (clampedPct >= 28 ? 'large' : 'medium');
+      if (sizeSelect) sizeSelect.value = this.state.watermark.size;
+
+      if (updateSlider && sizeSlider) {
+        sizeSlider.value = clampedPct.toString();
+      }
+      if (sizeVal) sizeVal.textContent = `${clampedPct}%`;
+
+      sizePresets.forEach((btn) => {
+        const btnPct = parseInt(btn.dataset.size, 10);
+        btn.classList.toggle('active', Math.abs(btnPct - clampedPct) <= 2);
+      });
+
       this.updateWatermarkLivePreview();
+    };
+
+    sizeSlider?.addEventListener('input', () => {
+      setScale(parseInt(sizeSlider.value, 10), false);
+    });
+
+    sizePresets.forEach((btn) => {
+      btn.addEventListener('click', () => {
+        const pct = parseInt(btn.dataset.size, 10);
+        if (!isNaN(pct)) setScale(pct, true);
+      });
+    });
+
+    sizeSelect?.addEventListener('change', () => {
+      const s = sizeSelect.value;
+      const pct = s === 'small' ? 10 : (s === 'large' ? 28 : 18);
+      setScale(pct, true);
     });
 
     opacitySlider?.addEventListener('input', () => {
@@ -1277,16 +1316,21 @@ class FrameFlowApp {
       this.updateWatermarkLivePreview();
     });
 
-    // Interactive Drag and Drop of Sticker directly over Video Crop Window
+    // Interactive Drag and Drop & Corner Resize of Sticker directly over Video Crop Window
     const draggableWatermark = document.getElementById('draggableCropWatermark');
-    let isDraggingSticker = false;
+    const resizeHandle = document.getElementById('stickerResizeHandle');
+    const stickerTooltip = document.getElementById('stickerTooltip');
+
+    let isInteracting = null; // 'drag' | 'resize' | null
+    let activePointerId = null;
     let stickerStartX = 0;
     let stickerStartY = 0;
     let stickerStartLeft = 0;
     let stickerStartTop = 0;
+    let stickerStartScale = 0.18;
 
     const onStickerPointerMove = (e) => {
-      if (!isDraggingSticker || !draggableWatermark) return;
+      if (!isInteracting || !draggableWatermark) return;
       const cropWindow = document.getElementById('cropWindow');
       if (!cropWindow) return;
 
@@ -1294,41 +1338,95 @@ class FrameFlowApp {
       const dx = e.clientX - stickerStartX;
       const dy = e.clientY - stickerStartY;
 
-      const maxLeft = Math.max(0, cropRect.width - draggableWatermark.offsetWidth);
-      const maxTop = Math.max(0, cropRect.height - draggableWatermark.offsetHeight);
+      if (isInteracting === 'resize') {
+        const cropW = Math.max(100, cropRect.width);
+        const startW = stickerStartScale * cropW;
+        const newW = Math.max(20, Math.min(cropW * 0.60, startW + dx));
+        const newScale = newW / cropW;
+        const pct = Math.round(newScale * 100);
+        setScale(pct, true);
 
-      const newLeft = Math.max(0, Math.min(maxLeft, stickerStartLeft + dx));
-      const newTop = Math.max(0, Math.min(maxTop, stickerStartTop + dy));
+        if (stickerTooltip) {
+          stickerTooltip.textContent = `Size: ${pct}%`;
+          stickerTooltip.classList.remove('hidden');
+        }
+      } else if (isInteracting === 'drag') {
+        const wmWidth = draggableWatermark.offsetWidth || 50;
+        const wmHeight = draggableWatermark.offsetHeight || 30;
+        const maxLeft = Math.max(0, cropRect.width - wmWidth);
+        const maxTop = Math.max(0, cropRect.height - wmHeight);
 
-      draggableWatermark.style.left = `${newLeft}px`;
-      draggableWatermark.style.top = `${newTop}px`;
-      draggableWatermark.style.right = 'auto';
-      draggableWatermark.style.bottom = 'auto';
+        const newLeft = Math.max(0, Math.min(maxLeft, stickerStartLeft + dx));
+        const newTop = Math.max(0, Math.min(maxTop, stickerStartTop + dy));
 
-      const relX = cropRect.width > 0 ? newLeft / cropRect.width : 0;
-      const relY = cropRect.height > 0 ? newTop / cropRect.height : 0;
+        draggableWatermark.style.left = `${newLeft}px`;
+        draggableWatermark.style.top = `${newTop}px`;
+        draggableWatermark.style.right = 'auto';
+        draggableWatermark.style.bottom = 'auto';
+        draggableWatermark.style.transform = 'none';
 
-      this.state.watermark.customNorm = { relX, relY };
-      this.state.watermark.position = 'custom';
+        const relX = cropRect.width > 0 ? newLeft / cropRect.width : 0;
+        const relY = cropRect.height > 0 ? newTop / cropRect.height : 0;
 
-      if (posSelect) {
-        posSelect.value = 'custom';
+        this.state.watermark.customNorm = { relX, relY };
+        this.state.watermark.position = 'custom';
+
+        if (posSelect) {
+          posSelect.value = 'custom';
+        }
+
+        if (stickerTooltip) {
+          stickerTooltip.textContent = `X: ${Math.round(relX * 100)}% Y: ${Math.round(relY * 100)}%`;
+          stickerTooltip.classList.remove('hidden');
+        }
       }
     };
 
     const onStickerPointerUp = () => {
-      if (!isDraggingSticker) return;
-      isDraggingSticker = false;
-      draggableWatermark?.classList.remove('is-dragging');
+      if (!isInteracting) return;
+      if (activePointerId !== null && draggableWatermark?.hasPointerCapture?.(activePointerId)) {
+        try { draggableWatermark.releasePointerCapture(activePointerId); } catch (_) {}
+      }
+      isInteracting = null;
+      activePointerId = null;
+      draggableWatermark?.classList.remove('is-dragging', 'is-resizing');
+      if (stickerTooltip) stickerTooltip.classList.add('hidden');
       window.removeEventListener('pointermove', onStickerPointerMove);
       window.removeEventListener('pointerup', onStickerPointerUp);
       window.removeEventListener('pointercancel', onStickerPointerUp);
     };
 
-    draggableWatermark?.addEventListener('pointerdown', (e) => {
+    resizeHandle?.addEventListener('pointerdown', (e) => {
       e.stopPropagation();
       e.preventDefault();
-      isDraggingSticker = true;
+      isInteracting = 'resize';
+      activePointerId = e.pointerId;
+      try { resizeHandle.setPointerCapture(e.pointerId); } catch (_) {}
+
+      stickerStartX = e.clientX;
+      stickerStartY = e.clientY;
+      stickerStartScale = typeof this.state.watermark.scale === 'number' ? this.state.watermark.scale : 0.18;
+
+      draggableWatermark.classList.add('is-resizing');
+      if (stickerTooltip) {
+        stickerTooltip.textContent = `Size: ${Math.round(stickerStartScale * 100)}%`;
+        stickerTooltip.classList.remove('hidden');
+      }
+
+      window.addEventListener('pointermove', onStickerPointerMove);
+      window.addEventListener('pointerup', onStickerPointerUp);
+      window.addEventListener('pointercancel', onStickerPointerUp);
+    });
+
+    draggableWatermark?.addEventListener('pointerdown', (e) => {
+      if (e.target === resizeHandle || resizeHandle?.contains(e.target)) return;
+
+      e.stopPropagation();
+      e.preventDefault();
+      isInteracting = 'drag';
+      activePointerId = e.pointerId;
+      try { draggableWatermark.setPointerCapture(e.pointerId); } catch (_) {}
+
       stickerStartX = e.clientX;
       stickerStartY = e.clientY;
 
@@ -1338,6 +1436,14 @@ class FrameFlowApp {
       stickerStartTop = elRect.top - parentRect.top;
 
       draggableWatermark.classList.add('is-dragging');
+      const relX = this.state.watermark.customNorm ? Math.round(this.state.watermark.customNorm.relX * 100) : Math.round((stickerStartLeft / (parentRect.width || 1)) * 100);
+      const relY = this.state.watermark.customNorm ? Math.round(this.state.watermark.customNorm.relY * 100) : Math.round((stickerStartTop / (parentRect.height || 1)) * 100);
+
+      if (stickerTooltip) {
+        stickerTooltip.textContent = `X: ${relX}% Y: ${relY}%`;
+        stickerTooltip.classList.remove('hidden');
+      }
+
       window.addEventListener('pointermove', onStickerPointerMove);
       window.addEventListener('pointerup', onStickerPointerUp);
       window.addEventListener('pointercancel', onStickerPointerUp);
@@ -1352,6 +1458,11 @@ class FrameFlowApp {
     const draggableCropWm = document.getElementById('draggableCropWatermark');
     const cropWmContent = document.getElementById('cropWatermarkContent');
     const wm = this.state.watermark;
+    const cropWindow = document.getElementById('cropWindow');
+
+    const scale = typeof wm.scale === 'number' ? wm.scale : (wm.size === 'small' ? 0.10 : wm.size === 'large' ? 0.28 : 0.18);
+    const cropW = cropWindow?.clientWidth || 300;
+    const cropH = cropWindow?.clientHeight || 200;
 
     if (box && tag) {
       const opacity = wm.opacity || 0.85;
@@ -1404,12 +1515,22 @@ class FrameFlowApp {
         draggableCropWm.style.opacity = (wm.opacity || 0.85).toString();
 
         if (wm.type === 'image' && wm.imageElement) {
-          cropWmContent.innerHTML = `<img src="${wm.imageElement.src}" style="height: 28px; max-width: 80px; object-fit: contain; pointer-events: none;">`;
+          const imgW = Math.max(24, Math.round(cropW * scale));
+          const maxImgH = Math.max(20, Math.round(cropH * 0.5));
+          cropWmContent.innerHTML = `<img src="${wm.imageElement.src}" style="width: ${imgW}px; max-height: ${maxImgH}px; height: auto; object-fit: contain; pointer-events: none; display: block;">`;
           cropWmContent.style.background = 'transparent';
           cropWmContent.style.border = 'none';
           cropWmContent.style.boxShadow = 'none';
+          cropWmContent.style.padding = '0';
         } else {
           cropWmContent.textContent = (wm.text || '@StoryFlow').trim();
+          const calcFontSize = Math.max(10, Math.round(cropW * scale * 0.22));
+          const padY = Math.max(3, Math.round(calcFontSize * 0.35));
+          const padX = Math.max(6, Math.round(calcFontSize * 0.7));
+          cropWmContent.style.fontSize = `${calcFontSize}px`;
+          cropWmContent.style.padding = `${padY}px ${padX}px`;
+          cropWmContent.style.borderRadius = `${Math.round(calcFontSize * 0.8)}px`;
+
           if (wm.style === 'gold-pill') {
             cropWmContent.style.background = 'rgba(46, 32, 22, 0.9)';
             cropWmContent.style.border = '1px solid #f5d97a';
@@ -1431,27 +1552,31 @@ class FrameFlowApp {
 
         // Positioning within cropWindow
         if (wm.position === 'custom' && wm.customNorm) {
-          const cropW = document.getElementById('cropWindow')?.clientWidth || 100;
-          const cropH = document.getElementById('cropWindow')?.clientHeight || 100;
-          draggableCropWm.style.left = `${Math.round(wm.customNorm.relX * cropW)}px`;
-          draggableCropWm.style.top = `${Math.round(wm.customNorm.relY * cropH)}px`;
+          const newLeft = Math.round(wm.customNorm.relX * cropW);
+          const newTop = Math.round(wm.customNorm.relY * cropH);
+          draggableCropWm.style.left = `${newLeft}px`;
+          draggableCropWm.style.top = `${newTop}px`;
           draggableCropWm.style.right = 'auto';
           draggableCropWm.style.bottom = 'auto';
+          draggableCropWm.style.transform = 'none';
         } else if (wm.position === 'bottom-left') {
           draggableCropWm.style.left = '12px';
           draggableCropWm.style.bottom = '12px';
           draggableCropWm.style.right = 'auto';
           draggableCropWm.style.top = 'auto';
+          draggableCropWm.style.transform = 'none';
         } else if (wm.position === 'top-right') {
           draggableCropWm.style.right = '12px';
           draggableCropWm.style.top = '12px';
           draggableCropWm.style.left = 'auto';
           draggableCropWm.style.bottom = 'auto';
+          draggableCropWm.style.transform = 'none';
         } else if (wm.position === 'top-left') {
           draggableCropWm.style.left = '12px';
           draggableCropWm.style.top = '12px';
           draggableCropWm.style.right = 'auto';
           draggableCropWm.style.bottom = 'auto';
+          draggableCropWm.style.transform = 'none';
         } else if (wm.position === 'center') {
           draggableCropWm.style.left = '50%';
           draggableCropWm.style.top = '50%';
@@ -1464,6 +1589,7 @@ class FrameFlowApp {
           draggableCropWm.style.bottom = '12px';
           draggableCropWm.style.left = 'auto';
           draggableCropWm.style.top = 'auto';
+          draggableCropWm.style.transform = 'none';
         }
       }
     }

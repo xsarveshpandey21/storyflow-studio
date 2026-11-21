@@ -528,19 +528,24 @@
         const imgH = img.naturalHeight || img.height || 120;
         const imgAspect = imgW / imgH;
         let scaleFrac = 0.18;
-        if (wm.size === "small") scaleFrac = 0.12;
-        else if (wm.size === "large") scaleFrac = 0.26;
+        if (typeof wm.scale === "number" && !isNaN(wm.scale)) {
+          scaleFrac = Math.max(0.05, Math.min(0.6, wm.scale));
+        } else if (wm.size === "small") {
+          scaleFrac = 0.1;
+        } else if (wm.size === "large") {
+          scaleFrac = 0.28;
+        }
         let drawW = Math.round(width * scaleFrac);
         let drawH = Math.round(drawW / imgAspect);
-        if (drawH > height * 0.4) {
-          drawH = Math.round(height * 0.4);
+        if (drawH > height * 0.5) {
+          drawH = Math.round(height * 0.5);
           drawW = Math.round(drawH * imgAspect);
         }
         let x = width - drawW - pad;
         let y = height - drawH - pad;
         if (pos === "custom" && wm.customNorm) {
-          x = Math.max(pad, Math.min(width - drawW - pad, Math.round(wm.customNorm.relX * width)));
-          y = Math.max(pad, Math.min(height - drawH - pad, Math.round(wm.customNorm.relY * height)));
+          x = Math.max(0, Math.min(width - drawW, Math.round(wm.customNorm.relX * width)));
+          y = Math.max(0, Math.min(height - drawH, Math.round(wm.customNorm.relY * height)));
         } else if (pos === "bottom-left") {
           x = pad;
           y = height - drawH - pad;
@@ -565,10 +570,16 @@
           ctx.restore();
           return;
         }
-        let fontScale = 0.038;
-        if (wm.size === "small") fontScale = 0.026;
-        else if (wm.size === "large") fontScale = 0.052;
-        const fontSize = Math.max(14, Math.round(Math.min(width, height) * fontScale));
+        let scaleFrac = 0.18;
+        if (typeof wm.scale === "number" && !isNaN(wm.scale)) {
+          scaleFrac = Math.max(0.05, Math.min(0.6, wm.scale));
+        } else if (wm.size === "small") {
+          scaleFrac = 0.1;
+        } else if (wm.size === "large") {
+          scaleFrac = 0.28;
+        }
+        const fontScale = scaleFrac * 0.211;
+        const fontSize = Math.max(12, Math.round(Math.min(width, height) * fontScale));
         ctx.font = `700 ${fontSize}px 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif`;
         const textMetrics = ctx.measureText(text);
         const textW = textMetrics.width;
@@ -580,8 +591,8 @@
         let x = width - pillW - pad;
         let y = height - pillH - pad;
         if (pos === "custom" && wm.customNorm) {
-          x = Math.max(pad, Math.min(width - pillW - pad, Math.round(wm.customNorm.relX * width)));
-          y = Math.max(pad, Math.min(height - pillH - pad, Math.round(wm.customNorm.relY * height)));
+          x = Math.max(0, Math.min(width - pillW, Math.round(wm.customNorm.relX * width)));
+          y = Math.max(0, Math.min(height - pillH, Math.round(wm.customNorm.relY * height)));
         } else if (pos === "bottom-left") {
           x = pad;
           y = height - pillH - pad;
@@ -10293,6 +10304,8 @@ ${fb.first_comment || ""}
           imageElement: null,
           position: "bottom-right",
           size: "medium",
+          scale: 0.18,
+          customNorm: null,
           opacity: 0.85
         },
         // Voice & Script
@@ -10813,7 +10826,9 @@ ${fb.first_comment || ""}
         }
       };
       const startCropDrag = (e) => {
+        var _a2, _b2;
         if (isResizingCorner) return;
+        if ((_b2 = (_a2 = e.target) == null ? void 0 : _a2.closest) == null ? void 0 : _b2.call(_a2, "#draggableCropWatermark")) return;
         if (this.state.aspectRatio === "custom") {
           if (!this.state.customNorm) {
             this.state.customNorm = this.getNormalizedCropBounds();
@@ -11318,9 +11333,38 @@ ${fb.first_comment || ""}
         }
         this.updateWatermarkLivePreview();
       });
-      sizeSelect == null ? void 0 : sizeSelect.addEventListener("change", () => {
-        this.state.watermark.size = sizeSelect.value;
+      const sizeSlider = document.getElementById("watermarkSizeSlider");
+      const sizeVal = document.getElementById("watermarkSizeVal");
+      const sizePresets = document.querySelectorAll(".btn-preset-size");
+      const setScale = (pct, updateSlider = true) => {
+        const clampedPct = Math.max(6, Math.min(50, Math.round(pct)));
+        const frac = clampedPct / 100;
+        this.state.watermark.scale = frac;
+        this.state.watermark.size = clampedPct <= 12 ? "small" : clampedPct >= 28 ? "large" : "medium";
+        if (sizeSelect) sizeSelect.value = this.state.watermark.size;
+        if (updateSlider && sizeSlider) {
+          sizeSlider.value = clampedPct.toString();
+        }
+        if (sizeVal) sizeVal.textContent = `${clampedPct}%`;
+        sizePresets.forEach((btn) => {
+          const btnPct = parseInt(btn.dataset.size, 10);
+          btn.classList.toggle("active", Math.abs(btnPct - clampedPct) <= 2);
+        });
         this.updateWatermarkLivePreview();
+      };
+      sizeSlider == null ? void 0 : sizeSlider.addEventListener("input", () => {
+        setScale(parseInt(sizeSlider.value, 10), false);
+      });
+      sizePresets.forEach((btn) => {
+        btn.addEventListener("click", () => {
+          const pct = parseInt(btn.dataset.size, 10);
+          if (!isNaN(pct)) setScale(pct, true);
+        });
+      });
+      sizeSelect == null ? void 0 : sizeSelect.addEventListener("change", () => {
+        const s = sizeSelect.value;
+        const pct = s === "small" ? 10 : s === "large" ? 28 : 18;
+        setScale(pct, true);
       });
       opacitySlider == null ? void 0 : opacitySlider.addEventListener("input", () => {
         const val = parseInt(opacitySlider.value, 10);
@@ -11329,47 +11373,107 @@ ${fb.first_comment || ""}
         this.updateWatermarkLivePreview();
       });
       const draggableWatermark = document.getElementById("draggableCropWatermark");
-      let isDraggingSticker = false;
+      const resizeHandle = document.getElementById("stickerResizeHandle");
+      const stickerTooltip = document.getElementById("stickerTooltip");
+      let isInteracting = null;
+      let activePointerId = null;
       let stickerStartX = 0;
       let stickerStartY = 0;
       let stickerStartLeft = 0;
       let stickerStartTop = 0;
+      let stickerStartScale = 0.18;
       const onStickerPointerMove = (e) => {
-        if (!isDraggingSticker || !draggableWatermark) return;
+        if (!isInteracting || !draggableWatermark) return;
         const cropWindow = document.getElementById("cropWindow");
         if (!cropWindow) return;
         const cropRect = cropWindow.getBoundingClientRect();
         const dx = e.clientX - stickerStartX;
         const dy = e.clientY - stickerStartY;
-        const maxLeft = Math.max(0, cropRect.width - draggableWatermark.offsetWidth);
-        const maxTop = Math.max(0, cropRect.height - draggableWatermark.offsetHeight);
-        const newLeft = Math.max(0, Math.min(maxLeft, stickerStartLeft + dx));
-        const newTop = Math.max(0, Math.min(maxTop, stickerStartTop + dy));
-        draggableWatermark.style.left = `${newLeft}px`;
-        draggableWatermark.style.top = `${newTop}px`;
-        draggableWatermark.style.right = "auto";
-        draggableWatermark.style.bottom = "auto";
-        const relX = cropRect.width > 0 ? newLeft / cropRect.width : 0;
-        const relY = cropRect.height > 0 ? newTop / cropRect.height : 0;
-        this.state.watermark.customNorm = { relX, relY };
-        this.state.watermark.position = "custom";
-        if (posSelect) {
-          posSelect.value = "custom";
+        if (isInteracting === "resize") {
+          const cropW = Math.max(100, cropRect.width);
+          const startW = stickerStartScale * cropW;
+          const newW = Math.max(20, Math.min(cropW * 0.6, startW + dx));
+          const newScale = newW / cropW;
+          const pct = Math.round(newScale * 100);
+          setScale(pct, true);
+          if (stickerTooltip) {
+            stickerTooltip.textContent = `Size: ${pct}%`;
+            stickerTooltip.classList.remove("hidden");
+          }
+        } else if (isInteracting === "drag") {
+          const wmWidth = draggableWatermark.offsetWidth || 50;
+          const wmHeight = draggableWatermark.offsetHeight || 30;
+          const maxLeft = Math.max(0, cropRect.width - wmWidth);
+          const maxTop = Math.max(0, cropRect.height - wmHeight);
+          const newLeft = Math.max(0, Math.min(maxLeft, stickerStartLeft + dx));
+          const newTop = Math.max(0, Math.min(maxTop, stickerStartTop + dy));
+          draggableWatermark.style.left = `${newLeft}px`;
+          draggableWatermark.style.top = `${newTop}px`;
+          draggableWatermark.style.right = "auto";
+          draggableWatermark.style.bottom = "auto";
+          draggableWatermark.style.transform = "none";
+          const relX = cropRect.width > 0 ? newLeft / cropRect.width : 0;
+          const relY = cropRect.height > 0 ? newTop / cropRect.height : 0;
+          this.state.watermark.customNorm = { relX, relY };
+          this.state.watermark.position = "custom";
+          if (posSelect) {
+            posSelect.value = "custom";
+          }
+          if (stickerTooltip) {
+            stickerTooltip.textContent = `X: ${Math.round(relX * 100)}% Y: ${Math.round(relY * 100)}%`;
+            stickerTooltip.classList.remove("hidden");
+          }
         }
       };
       const onStickerPointerUp = () => {
-        if (!isDraggingSticker) return;
-        isDraggingSticker = false;
-        draggableWatermark == null ? void 0 : draggableWatermark.classList.remove("is-dragging");
+        var _a;
+        if (!isInteracting) return;
+        if (activePointerId !== null && ((_a = draggableWatermark == null ? void 0 : draggableWatermark.hasPointerCapture) == null ? void 0 : _a.call(draggableWatermark, activePointerId))) {
+          try {
+            draggableWatermark.releasePointerCapture(activePointerId);
+          } catch (_) {
+          }
+        }
+        isInteracting = null;
+        activePointerId = null;
+        draggableWatermark == null ? void 0 : draggableWatermark.classList.remove("is-dragging", "is-resizing");
+        if (stickerTooltip) stickerTooltip.classList.add("hidden");
         window.removeEventListener("pointermove", onStickerPointerMove);
         window.removeEventListener("pointerup", onStickerPointerUp);
         window.removeEventListener("pointercancel", onStickerPointerUp);
       };
-      draggableWatermark == null ? void 0 : draggableWatermark.addEventListener("pointerdown", (e) => {
-        var _a;
+      resizeHandle == null ? void 0 : resizeHandle.addEventListener("pointerdown", (e) => {
         e.stopPropagation();
         e.preventDefault();
-        isDraggingSticker = true;
+        isInteracting = "resize";
+        activePointerId = e.pointerId;
+        try {
+          resizeHandle.setPointerCapture(e.pointerId);
+        } catch (_) {
+        }
+        stickerStartX = e.clientX;
+        stickerStartY = e.clientY;
+        stickerStartScale = typeof this.state.watermark.scale === "number" ? this.state.watermark.scale : 0.18;
+        draggableWatermark.classList.add("is-resizing");
+        if (stickerTooltip) {
+          stickerTooltip.textContent = `Size: ${Math.round(stickerStartScale * 100)}%`;
+          stickerTooltip.classList.remove("hidden");
+        }
+        window.addEventListener("pointermove", onStickerPointerMove);
+        window.addEventListener("pointerup", onStickerPointerUp);
+        window.addEventListener("pointercancel", onStickerPointerUp);
+      });
+      draggableWatermark == null ? void 0 : draggableWatermark.addEventListener("pointerdown", (e) => {
+        var _a;
+        if (e.target === resizeHandle || (resizeHandle == null ? void 0 : resizeHandle.contains(e.target))) return;
+        e.stopPropagation();
+        e.preventDefault();
+        isInteracting = "drag";
+        activePointerId = e.pointerId;
+        try {
+          draggableWatermark.setPointerCapture(e.pointerId);
+        } catch (_) {
+        }
         stickerStartX = e.clientX;
         stickerStartY = e.clientY;
         const parentRect = ((_a = document.getElementById("cropWindow")) == null ? void 0 : _a.getBoundingClientRect()) || { left: 0, top: 0 };
@@ -11377,6 +11481,12 @@ ${fb.first_comment || ""}
         stickerStartLeft = elRect.left - parentRect.left;
         stickerStartTop = elRect.top - parentRect.top;
         draggableWatermark.classList.add("is-dragging");
+        const relX = this.state.watermark.customNorm ? Math.round(this.state.watermark.customNorm.relX * 100) : Math.round(stickerStartLeft / (parentRect.width || 1) * 100);
+        const relY = this.state.watermark.customNorm ? Math.round(this.state.watermark.customNorm.relY * 100) : Math.round(stickerStartTop / (parentRect.height || 1) * 100);
+        if (stickerTooltip) {
+          stickerTooltip.textContent = `X: ${relX}% Y: ${relY}%`;
+          stickerTooltip.classList.remove("hidden");
+        }
         window.addEventListener("pointermove", onStickerPointerMove);
         window.addEventListener("pointerup", onStickerPointerUp);
         window.addEventListener("pointercancel", onStickerPointerUp);
@@ -11384,12 +11494,15 @@ ${fb.first_comment || ""}
       this.updateWatermarkLivePreview();
     }
     updateWatermarkLivePreview() {
-      var _a, _b;
       const box2 = document.getElementById("wmLivePreviewBox");
       const tag = document.getElementById("wmLivePreviewText");
       const draggableCropWm = document.getElementById("draggableCropWatermark");
       const cropWmContent = document.getElementById("cropWatermarkContent");
       const wm = this.state.watermark;
+      const cropWindow = document.getElementById("cropWindow");
+      const scale = typeof wm.scale === "number" ? wm.scale : wm.size === "small" ? 0.1 : wm.size === "large" ? 0.28 : 0.18;
+      const cropW = (cropWindow == null ? void 0 : cropWindow.clientWidth) || 300;
+      const cropH = (cropWindow == null ? void 0 : cropWindow.clientHeight) || 200;
       if (box2 && tag) {
         const opacity = wm.opacity || 0.85;
         tag.style.opacity = opacity.toString();
@@ -11433,12 +11546,21 @@ ${fb.first_comment || ""}
           draggableCropWm.classList.remove("hidden");
           draggableCropWm.style.opacity = (wm.opacity || 0.85).toString();
           if (wm.type === "image" && wm.imageElement) {
-            cropWmContent.innerHTML = `<img src="${wm.imageElement.src}" style="height: 28px; max-width: 80px; object-fit: contain; pointer-events: none;">`;
+            const imgW = Math.max(24, Math.round(cropW * scale));
+            const maxImgH = Math.max(20, Math.round(cropH * 0.5));
+            cropWmContent.innerHTML = `<img src="${wm.imageElement.src}" style="width: ${imgW}px; max-height: ${maxImgH}px; height: auto; object-fit: contain; pointer-events: none; display: block;">`;
             cropWmContent.style.background = "transparent";
             cropWmContent.style.border = "none";
             cropWmContent.style.boxShadow = "none";
+            cropWmContent.style.padding = "0";
           } else {
             cropWmContent.textContent = (wm.text || "@StoryFlow").trim();
+            const calcFontSize = Math.max(10, Math.round(cropW * scale * 0.22));
+            const padY = Math.max(3, Math.round(calcFontSize * 0.35));
+            const padX = Math.max(6, Math.round(calcFontSize * 0.7));
+            cropWmContent.style.fontSize = `${calcFontSize}px`;
+            cropWmContent.style.padding = `${padY}px ${padX}px`;
+            cropWmContent.style.borderRadius = `${Math.round(calcFontSize * 0.8)}px`;
             if (wm.style === "gold-pill") {
               cropWmContent.style.background = "rgba(46, 32, 22, 0.9)";
               cropWmContent.style.border = "1px solid #f5d97a";
@@ -11458,27 +11580,31 @@ ${fb.first_comment || ""}
             }
           }
           if (wm.position === "custom" && wm.customNorm) {
-            const cropW = ((_a = document.getElementById("cropWindow")) == null ? void 0 : _a.clientWidth) || 100;
-            const cropH = ((_b = document.getElementById("cropWindow")) == null ? void 0 : _b.clientHeight) || 100;
-            draggableCropWm.style.left = `${Math.round(wm.customNorm.relX * cropW)}px`;
-            draggableCropWm.style.top = `${Math.round(wm.customNorm.relY * cropH)}px`;
+            const newLeft = Math.round(wm.customNorm.relX * cropW);
+            const newTop = Math.round(wm.customNorm.relY * cropH);
+            draggableCropWm.style.left = `${newLeft}px`;
+            draggableCropWm.style.top = `${newTop}px`;
             draggableCropWm.style.right = "auto";
             draggableCropWm.style.bottom = "auto";
+            draggableCropWm.style.transform = "none";
           } else if (wm.position === "bottom-left") {
             draggableCropWm.style.left = "12px";
             draggableCropWm.style.bottom = "12px";
             draggableCropWm.style.right = "auto";
             draggableCropWm.style.top = "auto";
+            draggableCropWm.style.transform = "none";
           } else if (wm.position === "top-right") {
             draggableCropWm.style.right = "12px";
             draggableCropWm.style.top = "12px";
             draggableCropWm.style.left = "auto";
             draggableCropWm.style.bottom = "auto";
+            draggableCropWm.style.transform = "none";
           } else if (wm.position === "top-left") {
             draggableCropWm.style.left = "12px";
             draggableCropWm.style.top = "12px";
             draggableCropWm.style.right = "auto";
             draggableCropWm.style.bottom = "auto";
+            draggableCropWm.style.transform = "none";
           } else if (wm.position === "center") {
             draggableCropWm.style.left = "50%";
             draggableCropWm.style.top = "50%";
@@ -11490,6 +11616,7 @@ ${fb.first_comment || ""}
             draggableCropWm.style.bottom = "12px";
             draggableCropWm.style.left = "auto";
             draggableCropWm.style.top = "auto";
+            draggableCropWm.style.transform = "none";
           }
         }
       }

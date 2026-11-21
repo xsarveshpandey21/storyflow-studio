@@ -633,22 +633,27 @@ export class FrameExtractor {
       const imgH = img.naturalHeight || img.height || 120;
       const imgAspect = imgW / imgH;
 
-      let scaleFrac = 0.18; // medium
-      if (wm.size === 'small') scaleFrac = 0.12;
-      else if (wm.size === 'large') scaleFrac = 0.26;
+      let scaleFrac = 0.18; // medium default
+      if (typeof wm.scale === 'number' && !isNaN(wm.scale)) {
+        scaleFrac = Math.max(0.05, Math.min(0.60, wm.scale));
+      } else if (wm.size === 'small') {
+        scaleFrac = 0.10;
+      } else if (wm.size === 'large') {
+        scaleFrac = 0.28;
+      }
 
       let drawW = Math.round(width * scaleFrac);
       let drawH = Math.round(drawW / imgAspect);
-      if (drawH > height * 0.4) {
-        drawH = Math.round(height * 0.4);
+      if (drawH > height * 0.5) {
+        drawH = Math.round(height * 0.5);
         drawW = Math.round(drawH * imgAspect);
       }
 
       let x = width - drawW - pad;
       let y = height - drawH - pad;
       if (pos === 'custom' && wm.customNorm) {
-        x = Math.max(pad, Math.min(width - drawW - pad, Math.round(wm.customNorm.relX * width)));
-        y = Math.max(pad, Math.min(height - drawH - pad, Math.round(wm.customNorm.relY * height)));
+        x = Math.max(0, Math.min(width - drawW, Math.round(wm.customNorm.relX * width)));
+        y = Math.max(0, Math.min(height - drawH, Math.round(wm.customNorm.relY * height)));
       } else if (pos === 'bottom-left') {
         x = pad;
         y = height - drawH - pad;
@@ -675,10 +680,17 @@ export class FrameExtractor {
         return;
       }
 
-      let fontScale = 0.038;
-      if (wm.size === 'small') fontScale = 0.026;
-      else if (wm.size === 'large') fontScale = 0.052;
-      const fontSize = Math.max(14, Math.round(Math.min(width, height) * fontScale));
+      let scaleFrac = 0.18;
+      if (typeof wm.scale === 'number' && !isNaN(wm.scale)) {
+        scaleFrac = Math.max(0.05, Math.min(0.60, wm.scale));
+      } else if (wm.size === 'small') {
+        scaleFrac = 0.10;
+      } else if (wm.size === 'large') {
+        scaleFrac = 0.28;
+      }
+
+      const fontScale = scaleFrac * 0.211;
+      const fontSize = Math.max(12, Math.round(Math.min(width, height) * fontScale));
 
       ctx.font = `700 ${fontSize}px 'Plus Jakarta Sans', -apple-system, BlinkMacSystemFont, sans-serif`;
       const textMetrics = ctx.measureText(text);
@@ -693,8 +705,8 @@ export class FrameExtractor {
       let x = width - pillW - pad;
       let y = height - pillH - pad;
       if (pos === 'custom' && wm.customNorm) {
-        x = Math.max(pad, Math.min(width - pillW - pad, Math.round(wm.customNorm.relX * width)));
-        y = Math.max(pad, Math.min(height - pillH - pad, Math.round(wm.customNorm.relY * height)));
+        x = Math.max(0, Math.min(width - pillW, Math.round(wm.customNorm.relX * width)));
+        y = Math.max(0, Math.min(height - pillH, Math.round(wm.customNorm.relY * height)));
       } else if (pos === 'bottom-left') {
         x = pad;
         y = height - pillH - pad;
